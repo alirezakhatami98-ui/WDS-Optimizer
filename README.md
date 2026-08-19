@@ -1,15 +1,16 @@
-# WDS Optimization Toolkit (v1.1.1)
+# WDS Optimization Toolkit (v1.2.0)
 
 A MATLAB-based Water Distribution Network (WDS) Optimization and Hydraulic Analysis Tool powered by EPANET C-API and Genetic Algorithm (GA).
 
 ---
 
-## 🌟 What's New in v1.1.1
+## 🌟 What's New in v1.2.0
 
-* **Hydraulic Results Analysis Tab**: View detailed hydraulic outputs, including node pressures and pipe flow velocities alongside optimization costs.
+* **Hydraulic Visualization Plots**: Interactive bar charts for Node Pressure Profile and Pipe Velocity Distribution with visual constraint limits ($P_{min}$ and $V_{max}$).
+* **Hydraulic Results Tab**: Integrated layout featuring both graphical plots and detailed node/pipe attribute tables.
 * **Pressure Constraint Control**: Interactive user-defined Minimum Pressure limit ($P_{min}$) directly in the GUI.
-* **Path & OS Compatibility Fix**: Completely eliminated EPANET path space errors by utilizing clean file handling routines.
-* **Multi-Sheet Excel Export**: Export pipe optimization specs and node hydraulic results into separate Excel sheets with one click.
+* **Path & OS Compatibility**: Safe EPANET DLL file handling routines eliminating space-in-path errors.
+* **Multi-Sheet Excel Export**: Export pipe optimization specs and node hydraulic results into separate Excel sheets.
 
 ---
 
@@ -17,7 +18,7 @@ A MATLAB-based Water Distribution Network (WDS) Optimization and Hydraulic Analy
 
 * **Genetic Algorithm Engine**: Optimizes pipe diameters to minimize total construction cost while respecting hydraulic pressure constraints.
 * **EPANET C-DLL Integration**: Performs complete hydraulic network solver routines.
-* **Tabbed GUI Interface**: Separate views for Convergence Curve/Pipe Costs and Node Pressure distributions.
+* **Tabbed GUI Interface**: Separate views for Convergence Curve/Pipe Costs and Hydraulic Visualization.
 
 ---
 
@@ -29,7 +30,7 @@ A MATLAB-based Water Distribution Network (WDS) Optimization and Hydraulic Analy
    WDS_Optimizer_App
    ```
 3. Load the input files (`.inp` network file, `D.txt` diameter set, and `Cost.txt` cost profile).
-4. Set the Population Size, Max Generations, and Minimum Pressure ($P_{min}$).
+4. Set Population Size, Max Generations, and Minimum Pressure ($P_{min}$).
 5. Click **Run Optimization**.
 
 ---

@@ -38,7 +38,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         UITablePipes          matlab.ui.control.Table
         CostSummaryLabel      matlab.ui.control.Label
         
-        % Tab 2 (Hydraulics)
+        % Tab 2 (Hydraulic Plots & Tables)
+        PressureAxes          matlab.ui.control.UIAxes
+        VelocityAxes          matlab.ui.control.UIAxes
         UITableNodes          matlab.ui.control.Table
         NodeStatusLabel       matlab.ui.control.Label
         
@@ -59,9 +61,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             [file, path] = uigetfile('*.inp', 'Select EPANET .inp File');
             if ischar(file)
                 fullPath = fullfile(path, file);
-                % Normalizing path separators to avoid escape sequence issues
                 fullPath = strrep(fullPath, '\', '/');
-        
+                
                 if contains(fullPath, ' ')
                     uialert(app.UIFigure, ...
                         'The selected file path contains a space. Please move the folder or file to a path without spaces.', ...
@@ -106,12 +107,11 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 Cost = load(app.CostFileStr);
                 D    = Din * 25.4; % inch to mm
 
-                % --- FIX: Save directly to C:\ to guarantee NO spaces in path ---
+                % Safe copy to C:\ or pwd to prevent path space issues with EPANET DLL
                 try
                     tempInpPath = 'C:\temp_network.inp';
                     copyfile(app.InpFileStr, tempInpPath, 'f');
                 catch
-                    % If C:\ is write-protected, save to current MATLAB working directory
                     tempInpPath = fullfile(pwd, 'temp_network.inp');
                     copyfile(app.InpFileStr, tempInpPath, 'f');
                 end
@@ -164,7 +164,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 app.UITablePipes.Data = TableDataPipes;
                 app.CostSummaryLabel.Text = sprintf('Optimal Cost: $%.2f', app.BestCost);
 
-                % Update Tab 2 Tables (Nodes)
+                % Update Tab 2 Tables & Plots
                 numNodes = numel(app.NodePressures);
                 NodeIDs = (1:numNodes)';
                 PressureStatus = cell(numNodes, 1);
@@ -185,6 +185,23 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 minP = min(app.NodePressures);
                 app.NodeStatusLabel.Text = sprintf('Min Node Pressure: %.2f m (Limit: %.1f m)', minP, pMinVal);
+
+                % --- Hydraulic Plots (v1.2.0) ---
+                % 1. Node Pressure Bar Plot
+                bar(app.PressureAxes, 1:numNodes, app.NodePressures, 0.6, 'FaceColor', [0 0.45 0.74]);
+                yline(app.PressureAxes, pMinVal, '--r', sprintf('Pmin (%.1fm)', pMinVal), 'LineWidth', 1.5, 'FontWeight', 'bold');
+                xlabel(app.PressureAxes, 'Node ID');
+                ylabel(app.PressureAxes, 'Pressure (m)');
+                title(app.PressureAxes, 'Node Pressure Profile');
+                grid(app.PressureAxes, 'on');
+
+                % 2. Pipe Velocity Bar Plot
+                bar(app.VelocityAxes, 1:NP, app.PipeVelocities, 0.6, 'FaceColor', [0.47 0.67 0.19]);
+                yline(app.VelocityAxes, 2.5, '--r', 'Vmax (2.5m/s)', 'LineWidth', 1.5, 'FontWeight', 'bold');
+                xlabel(app.VelocityAxes, 'Pipe ID');
+                ylabel(app.VelocityAxes, 'Velocity (m/s)');
+                title(app.VelocityAxes, 'Pipe Velocity Distribution');
+                grid(app.VelocityAxes, 'on');
 
                 app.StatusLabel.Text = 'Status: Completed Successfully!';
                 app.ExportButton.Enable = 'on';
@@ -328,52 +345,54 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
         function createComponents(app)
             % Main Figure
-            app.UIFigure = uifigure('Position', [100 100 950 600], 'Name', 'WDS Optimization Toolkit v1.1.1');
+            app.UIFigure = uifigure('Position', [100 100 980 620], 'Name', 'WDS Optimization Toolkit v1.2.0');
 
             % Panels
-            app.LeftPanel  = uipanel(app.UIFigure, 'Title', 'Input Controls & Constraints', 'Position', [10 10 300 580]);
-            app.RightPanel = uipanel(app.UIFigure, 'Title', 'Results & Hydraulic Analysis', 'Position', [320 10 620 580]);
+            app.LeftPanel  = uipanel(app.UIFigure, 'Title', 'Input Controls & Constraints', 'Position', [10 10 300 600]);
+            app.RightPanel = uipanel(app.UIFigure, 'Title', 'Results & Hydraulic Analysis', 'Position', [320 10 650 600]);
 
             % Left Panel - File Selection
-            app.INPButton  = uibutton(app.LeftPanel, 'push', 'Text', 'Load .INP File', 'Position', [20 510 120 28], 'ButtonPushedFcn', @(btn, e) SelectINPFile(app, e));
-            app.INPLabel   = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 510 130 28]);
+            app.INPButton  = uibutton(app.LeftPanel, 'push', 'Text', 'Load .INP File', 'Position', [20 530 120 28], 'ButtonPushedFcn', @(btn, e) SelectINPFile(app, e));
+            app.INPLabel   = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 530 130 28]);
 
-            app.DButton    = uibutton(app.LeftPanel, 'push', 'Text', 'Load D.txt', 'Position', [20 470 120 28], 'ButtonPushedFcn', @(btn, e) SelectDFile(app, e));
-            app.DLabel     = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 470 130 28]);
+            app.DButton    = uibutton(app.LeftPanel, 'push', 'Text', 'Load D.txt', 'Position', [20 490 120 28], 'ButtonPushedFcn', @(btn, e) SelectDFile(app, e));
+            app.DLabel     = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 490 130 28]);
 
-            app.CostButton = uibutton(app.LeftPanel, 'push', 'Text', 'Load Cost.txt', 'Position', [20 430 120 28], 'ButtonPushedFcn', @(btn, e) SelectCostFile(app, e));
-            app.CostLabel  = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 430 130 28]);
+            app.CostButton = uibutton(app.LeftPanel, 'push', 'Text', 'Load Cost.txt', 'Position', [20 450 120 28], 'ButtonPushedFcn', @(btn, e) SelectCostFile(app, e));
+            app.CostLabel  = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 450 130 28]);
 
             % Algorithm Parameters
-            app.NSEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Population (NS):', 'Position', [20 375 130 22]);
-            app.NSEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 375 100 22], 'Value', 100);
+            app.NSEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Population (NS):', 'Position', [20 395 130 22]);
+            app.NSEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 395 100 22], 'Value', 100);
 
-            app.MaxGenEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Max Gen:', 'Position', [20 340 130 22]);
-            app.MaxGenEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 340 100 22], 'Value', 500);
+            app.MaxGenEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Max Gen:', 'Position', [20 360 130 22]);
+            app.MaxGenEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 360 100 22], 'Value', 500);
 
             % Constraints Control
-            app.PminEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Min Pressure (m):', 'Position', [20 290 130 22], 'FontWeight', 'bold');
-            app.PminEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 290 100 22], 'Value', 30.0);
+            app.PminEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Min Pressure (m):', 'Position', [20 310 130 22], 'FontWeight', 'bold');
+            app.PminEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 310 100 22], 'Value', 30.0);
 
             % Action Buttons
-            app.RunButton    = uibutton(app.LeftPanel, 'push', 'Text', 'Run Optimization', 'Position', [20 160 250 42], 'BackgroundColor', [0.1 0.6 0.2], 'FontColor', 'w', 'FontSize', 14, 'FontWeight', 'bold', 'ButtonPushedFcn', @(btn, e) RunOptimization(app, e));
-            app.ExportButton = uibutton(app.LeftPanel, 'push', 'Text', 'Export Excel (Multi-Sheet)', 'Position', [20 100 250 38], 'Enable', 'off', 'ButtonPushedFcn', @(btn, e) ExportToExcel(app, e));
+            app.RunButton    = uibutton(app.LeftPanel, 'push', 'Text', 'Run Optimization', 'Position', [20 170 250 42], 'BackgroundColor', [0.1 0.6 0.2], 'FontColor', 'w', 'FontSize', 14, 'FontWeight', 'bold', 'ButtonPushedFcn', @(btn, e) RunOptimization(app, e));
+            app.ExportButton = uibutton(app.LeftPanel, 'push', 'Text', 'Export Excel (Multi-Sheet)', 'Position', [20 110 250 38], 'Enable', 'off', 'ButtonPushedFcn', @(btn, e) ExportToExcel(app, e));
 
             app.StatusLabel  = uilabel(app.LeftPanel, 'Text', 'Status: Ready', 'Position', [20 30 260 30], 'FontWeight', 'bold');
 
             % Tab Group in Right Panel
-            app.TabGroup     = uitabgroup(app.RightPanel, 'Position', [10 10 600 540]);
+            app.TabGroup     = uitabgroup(app.RightPanel, 'Position', [10 10 630 560]);
             app.CostTab      = uitab(app.TabGroup, 'Title', 'Optimization & Costs');
             app.HydraulicsTab= uitab(app.TabGroup, 'Title', 'Hydraulic Results');
 
             % Tab 1 Components
-            app.UIAxes           = uiaxes(app.CostTab, 'Position', [10 200 570 300]);
-            app.UITablePipes     = uitable(app.CostTab, 'Position', [10 20 360 160]);
-            app.CostSummaryLabel = uilabel(app.CostTab, 'Text', 'Optimal Cost: $ -', 'Position', [390 85 180 30], 'FontSize', 12, 'FontWeight', 'bold');
+            app.UIAxes           = uiaxes(app.CostTab, 'Position', [10 210 600 310]);
+            app.UITablePipes     = uitable(app.CostTab, 'Position', [10 20 380 170]);
+            app.CostSummaryLabel = uilabel(app.CostTab, 'Text', 'Optimal Cost: $ -', 'Position', [410 90 200 30], 'FontSize', 12, 'FontWeight', 'bold');
 
-            % Tab 2 Components
-            app.UITableNodes     = uitable(app.HydraulicsTab, 'Position', [10 60 570 440]);
-            app.NodeStatusLabel  = uilabel(app.HydraulicsTab, 'Text', 'Min Node Pressure: -', 'Position', [10 15 570 30], 'FontSize', 12, 'FontWeight', 'bold');
+            % Tab 2 Components (Plots & Table Layout)
+            app.PressureAxes     = uiaxes(app.HydraulicsTab, 'Position', [10 270 360 250]);
+            app.VelocityAxes     = uiaxes(app.HydraulicsTab, 'Position', [10 10 360 250]);
+            app.UITableNodes     = uitable(app.HydraulicsTab, 'Position', [380 50 235 470]);
+            app.NodeStatusLabel  = uilabel(app.HydraulicsTab, 'Text', 'Min Node Pressure: -', 'Position', [380 10 235 30], 'FontSize', 11, 'FontWeight', 'bold');
         end
     end
 
