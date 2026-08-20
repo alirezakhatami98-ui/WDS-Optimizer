@@ -23,6 +23,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         % Constraint Input Controls
         PminEditField         matlab.ui.control.NumericEditField
         PminEditFieldLabel    matlab.ui.control.Label
+        VmaxEditField         matlab.ui.control.NumericEditField
+        VmaxEditFieldLabel    matlab.ui.control.Label
         
         RunButton             matlab.ui.control.Button
         ExportButton          matlab.ui.control.Button
@@ -65,8 +67,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 
                 if contains(fullPath, ' ')
                     uialert(app.UIFigure, ...
-                        'The selected file path contains a space. Please move the folder or file to a path without spaces.', ...
-                        'File path error');
+                        'The selected file path contains spaces. Please move the folder or file to a directory path without spaces.', ...
+                        'File Path Error');
                     return;
                 end
                 app.InpFileStr = fullPath;
@@ -93,7 +95,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         % --- Main Run Optimization ---
         function RunOptimization(app, ~)
             if isempty(app.InpFileStr) || isempty(app.DFileStr) || isempty(app.CostFileStr)
-                uialert(app.UIFigure, 'Please load all input files first!', 'Input Error');
+                uialert(app.UIFigure, 'Please load all required input files first!', 'Input Error');
                 return;
             end
 
@@ -105,9 +107,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 % 1. Load Data
                 Din  = load(app.DFileStr);
                 Cost = load(app.CostFileStr);
-                D    = Din * 25.4; % inch to mm
+                D    = Din * 25.4; % Convert inches to mm
 
-                % Safe copy to C:\ or pwd to prevent path space issues with EPANET DLL
+                % Safe copy to root drive or pwd to prevent path space issues with EPANET DLL
                 try
                     tempInpPath = 'C:\temp_network.inp';
                     copyfile(app.InpFileStr, tempInpPath, 'f');
@@ -129,6 +131,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 % 3. Read Algorithm Params & User Constraints
                 Params.NS   = app.NSEditField.Value;
                 Params.Pmin = app.PminEditField.Value;
+                Params.Vmax = app.VmaxEditField.Value;
                 MaxGen      = app.MaxGenEditField.Value;
 
                 % 4. Execution
@@ -169,6 +172,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 NodeIDs = (1:numNodes)';
                 PressureStatus = cell(numNodes, 1);
                 pMinVal = Params.Pmin;
+                vMaxVal = Params.Vmax;
 
                 for k = 1:numNodes
                     pVal = app.NodePressures(k);
@@ -184,9 +188,10 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 app.UITableNodes.Data = TableDataNodes;
 
                 minP = min(app.NodePressures);
-                app.NodeStatusLabel.Text = sprintf('Min Node Pressure: %.2f m (Limit: %.1f m)', minP, pMinVal);
+                maxV = max(app.PipeVelocities);
+                app.NodeStatusLabel.Text = sprintf('Min P: %.2fm | Max V: %.2fm/s', minP, maxV);
 
-                % --- Hydraulic Plots (v1.2.0) ---
+                % --- Hydraulic Plots ---
                 % 1. Node Pressure Bar Plot
                 bar(app.PressureAxes, 1:numNodes, app.NodePressures, 0.6, 'FaceColor', [0 0.45 0.74]);
                 yline(app.PressureAxes, pMinVal, '--r', sprintf('Pmin (%.1fm)', pMinVal), 'LineWidth', 1.5, 'FontWeight', 'bold');
@@ -197,7 +202,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 % 2. Pipe Velocity Bar Plot
                 bar(app.VelocityAxes, 1:NP, app.PipeVelocities, 0.6, 'FaceColor', [0.47 0.67 0.19]);
-                yline(app.VelocityAxes, 2.5, '--r', 'Vmax (2.5m/s)', 'LineWidth', 1.5, 'FontWeight', 'bold');
+                yline(app.VelocityAxes, vMaxVal, '--r', sprintf('Vmax (%.1fm/s)', vMaxVal), 'LineWidth', 1.5, 'FontWeight', 'bold');
                 xlabel(app.VelocityAxes, 'Pipe ID');
                 ylabel(app.VelocityAxes, 'Velocity (m/s)');
                 title(app.VelocityAxes, 'Pipe Velocity Distribution');
@@ -214,15 +219,18 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.RunButton.Enable = 'on';
         end
 
-        % --- GA Engine ---
+        % --- GA Engine (Fixed Penalty & Empty Solution Handling) ---
         function [Score, Position, Conv] = RunGA(app, d, D, NP, NN, L, Din, Cost, Params, MaxGen)
             Problem.d = d; Problem.D = D; Problem.NP = NP;
             Problem.NN = NN; Problem.L = L; Problem.Din = Din;
-            Problem.Cost = Cost; Problem.Pmin = Params.Pmin;
+            Problem.Cost = Cost; Problem.Pmin = Params.Pmin; Problem.Vmax = Params.Vmax;
 
             NS = Params.NS; Pc = 0.8; Pm = 0.03; ND = numel(D);
             Conv = zeros(MaxGen, 1);
             BestCostEver = Inf; BestSolEver = [];
+    
+            % Track best unfeasible solution as fallback
+            BestViolEver = Inf; BestUnfeasibleSol = []; BestUnfeasibleCost = Inf;
 
             Pop = randi(ND, NP, NS);
             [cost, viol, feas] = app.evaluate_pop(Pop, Problem);
@@ -247,11 +255,17 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     end
                 end
 
-                if ~isempty(BestSolEver), NewPop(:, 1) = BestSolEver; end
+                % Elitism
+                if ~isempty(BestSolEver)
+                    NewPop(:, 1) = BestSolEver;
+                elseif ~isempty(BestUnfeasibleSol)
+                    NewPop(:, 1) = BestUnfeasibleSol;
+                end
 
                 Pop = NewPop;
                 [cost, viol, feas] = app.evaluate_pop(Pop, Problem);
 
+                % 1. Check Feasible Solutions
                 feasible_idx = find(feas);
                 if ~isempty(feasible_idx)
                     [min_c, k] = min(cost(feasible_idx));
@@ -261,7 +275,20 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     end
                 end
 
-                Conv(G) = BestCostEver;
+                % 2. Track Best Solution by Minimum Violation (Fallback)
+                [min_v, idx_v] = min(viol);
+                if min_v < BestViolEver
+                    BestViolEver = min_v;
+                    BestUnfeasibleSol = Pop(:, idx_v);
+                    BestUnfeasibleCost = cost(idx_v);
+                end
+
+                % Record Convergence
+                if ~isempty(BestSolEver)
+                    Conv(G) = BestCostEver;
+                else
+                    Conv(G) = BestUnfeasibleCost;
+                end
 
                 if mod(G, 5) == 0 || G == MaxGen
                     plot(app.UIAxes, 1:G, Conv(1:G), 'LineWidth', 2, 'Color', [0.85 0.32 0.1]);
@@ -271,6 +298,15 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     grid(app.UIAxes, 'on');
                     drawnow;
                 end
+            end
+
+            % Final Fallback if no 100% feasible solution was found
+            if isempty(BestSolEver)
+                BestSolEver = BestUnfeasibleSol;
+                BestCostEver = BestUnfeasibleCost;
+                uialert(app.UIFigure, ...
+                    'No fully feasible solution found for the given Vmax and Pmin limits. Displaying the solution with minimum constraint violation.', ...
+                    'Constraint Limit Alert', 'Icon', 'warning');
             end
 
             Score = BestCostEver;
@@ -317,7 +353,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
         function [cost, viol, feas] = evaluate_ind(~, ind, Problem)
             d = Problem.d; D = Problem.D; NP = Problem.NP; L = Problem.L;
-            Din = Problem.Din; Cost = Problem.Cost; Pmin = Problem.Pmin;
+            Din = Problem.Din; Cost = Problem.Cost; 
+            Pmin = Problem.Pmin; Vmax = Problem.Vmax;
 
             d.setLinkDiameter(1:NP, D(ind)');
             d.solveCompleteHydraulics();
@@ -325,6 +362,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             P = d.getNodePressure();
             types = d.getNodeType();
             Pj = P(strcmpi(types, 'JUNCTION'));
+            
+            V = d.getLinkVelocity();
+            Vpipes = abs(V(1:NP));
 
             % Cost Calculation
             cost = 0;
@@ -334,8 +374,11 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 cost = cost + L(i) * Cost(idx);
             end
 
-            % Pressure Constraint Violation
-            viol = sum(max(0, Pmin - Pj));
+            % Dual Constraint Violations (Pressure + Velocity)
+            p_viol = sum(max(0, Pmin - Pj));
+            v_viol = sum(max(0, Vpipes - Vmax));
+            
+            viol = p_viol + v_viol;
             feas = (viol == 0);
         end
     end
@@ -345,32 +388,35 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
         function createComponents(app)
             % Main Figure
-            app.UIFigure = uifigure('Position', [100 100 980 620], 'Name', 'WDS Optimization Toolkit v1.2.0');
+            app.UIFigure = uifigure('Position', [100 100 980 640], 'Name', 'WDS Optimization Toolkit v1.3.0');
 
             % Panels
-            app.LeftPanel  = uipanel(app.UIFigure, 'Title', 'Input Controls & Constraints', 'Position', [10 10 300 600]);
-            app.RightPanel = uipanel(app.UIFigure, 'Title', 'Results & Hydraulic Analysis', 'Position', [320 10 650 600]);
+            app.LeftPanel  = uipanel(app.UIFigure, 'Title', 'Input Controls & Constraints', 'Position', [10 10 300 620]);
+            app.RightPanel = uipanel(app.UIFigure, 'Title', 'Results & Hydraulic Analysis', 'Position', [320 10 650 620]);
 
             % Left Panel - File Selection
-            app.INPButton  = uibutton(app.LeftPanel, 'push', 'Text', 'Load .INP File', 'Position', [20 530 120 28], 'ButtonPushedFcn', @(btn, e) SelectINPFile(app, e));
-            app.INPLabel   = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 530 130 28]);
+            app.INPButton  = uibutton(app.LeftPanel, 'push', 'Text', 'Load .INP File', 'Position', [20 550 120 28], 'ButtonPushedFcn', @(btn, e) SelectINPFile(app, e));
+            app.INPLabel   = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 550 130 28]);
 
-            app.DButton    = uibutton(app.LeftPanel, 'push', 'Text', 'Load D.txt', 'Position', [20 490 120 28], 'ButtonPushedFcn', @(btn, e) SelectDFile(app, e));
-            app.DLabel     = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 490 130 28]);
+            app.DButton    = uibutton(app.LeftPanel, 'push', 'Text', 'Load D.txt', 'Position', [20 510 120 28], 'ButtonPushedFcn', @(btn, e) SelectDFile(app, e));
+            app.DLabel     = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 510 130 28]);
 
-            app.CostButton = uibutton(app.LeftPanel, 'push', 'Text', 'Load Cost.txt', 'Position', [20 450 120 28], 'ButtonPushedFcn', @(btn, e) SelectCostFile(app, e));
-            app.CostLabel  = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 450 130 28]);
+            app.CostButton = uibutton(app.LeftPanel, 'push', 'Text', 'Load Cost.txt', 'Position', [20 470 120 28], 'ButtonPushedFcn', @(btn, e) SelectCostFile(app, e));
+            app.CostLabel  = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 470 130 28]);
 
             % Algorithm Parameters
-            app.NSEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Population (NS):', 'Position', [20 395 130 22]);
-            app.NSEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 395 100 22], 'Value', 100);
+            app.NSEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Population (NS):', 'Position', [20 415 130 22]);
+            app.NSEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 415 100 22], 'Value', 100);
 
-            app.MaxGenEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Max Gen:', 'Position', [20 360 130 22]);
-            app.MaxGenEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 360 100 22], 'Value', 500);
+            app.MaxGenEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Max Gen:', 'Position', [20 380 130 22]);
+            app.MaxGenEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 380 100 22], 'Value', 500);
 
-            % Constraints Control
-            app.PminEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Min Pressure (m):', 'Position', [20 310 130 22], 'FontWeight', 'bold');
-            app.PminEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 310 100 22], 'Value', 30.0);
+            % Constraints Controls
+            app.PminEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Min Pressure (m):', 'Position', [20 330 130 22], 'FontWeight', 'bold');
+            app.PminEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 330 100 22], 'Value', 30.0);
+
+            app.VmaxEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Max Velocity (m/s):', 'Position', [20 295 130 22], 'FontWeight', 'bold');
+            app.VmaxEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 295 100 22], 'Value', 2.5);
 
             % Action Buttons
             app.RunButton    = uibutton(app.LeftPanel, 'push', 'Text', 'Run Optimization', 'Position', [20 170 250 42], 'BackgroundColor', [0.1 0.6 0.2], 'FontColor', 'w', 'FontSize', 14, 'FontWeight', 'bold', 'ButtonPushedFcn', @(btn, e) RunOptimization(app, e));
@@ -379,20 +425,20 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.StatusLabel  = uilabel(app.LeftPanel, 'Text', 'Status: Ready', 'Position', [20 30 260 30], 'FontWeight', 'bold');
 
             % Tab Group in Right Panel
-            app.TabGroup     = uitabgroup(app.RightPanel, 'Position', [10 10 630 560]);
+            app.TabGroup     = uitabgroup(app.RightPanel, 'Position', [10 10 630 580]);
             app.CostTab      = uitab(app.TabGroup, 'Title', 'Optimization & Costs');
             app.HydraulicsTab= uitab(app.TabGroup, 'Title', 'Hydraulic Results');
 
             % Tab 1 Components
-            app.UIAxes           = uiaxes(app.CostTab, 'Position', [10 210 600 310]);
-            app.UITablePipes     = uitable(app.CostTab, 'Position', [10 20 380 170]);
-            app.CostSummaryLabel = uilabel(app.CostTab, 'Text', 'Optimal Cost: $ -', 'Position', [410 90 200 30], 'FontSize', 12, 'FontWeight', 'bold');
+            app.UIAxes           = uiaxes(app.CostTab, 'Position', [10 220 600 320]);
+            app.UITablePipes     = uitable(app.CostTab, 'Position', [10 20 380 180]);
+            app.CostSummaryLabel = uilabel(app.CostTab, 'Text', 'Optimal Cost: $ -', 'Position', [410 95 200 30], 'FontSize', 12, 'FontWeight', 'bold');
 
             % Tab 2 Components (Plots & Table Layout)
-            app.PressureAxes     = uiaxes(app.HydraulicsTab, 'Position', [10 270 360 250]);
-            app.VelocityAxes     = uiaxes(app.HydraulicsTab, 'Position', [10 10 360 250]);
-            app.UITableNodes     = uitable(app.HydraulicsTab, 'Position', [380 50 235 470]);
-            app.NodeStatusLabel  = uilabel(app.HydraulicsTab, 'Text', 'Min Node Pressure: -', 'Position', [380 10 235 30], 'FontSize', 11, 'FontWeight', 'bold');
+            app.PressureAxes     = uiaxes(app.HydraulicsTab, 'Position', [10 280 360 260]);
+            app.VelocityAxes     = uiaxes(app.HydraulicsTab, 'Position', [10 10 360 260]);
+            app.UITableNodes     = uitable(app.HydraulicsTab, 'Position', [380 50 235 490]);
+            app.NodeStatusLabel  = uilabel(app.HydraulicsTab, 'Text', 'Min P: - | Max V: -', 'Position', [380 10 235 30], 'FontSize', 11, 'FontWeight', 'bold');
         end
     end
 
