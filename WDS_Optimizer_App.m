@@ -14,7 +14,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         CostButton            matlab.ui.control.Button
         CostLabel             matlab.ui.control.Label
         
-        % Algorithm Inputs
+        % Algorithm Selection & Inputs
+        AlgorithmDropDownLabel matlab.ui.control.Label
+        AlgorithmDropDown     matlab.ui.control.DropDown
         NSEditField           matlab.ui.control.NumericEditField
         NSEditFieldLabel      matlab.ui.control.Label
         MaxGenEditField       matlab.ui.control.NumericEditField
@@ -133,9 +135,14 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 Params.Pmin = app.PminEditField.Value;
                 Params.Vmax = app.VmaxEditField.Value;
                 MaxGen      = app.MaxGenEditField.Value;
+                SelectedAlg = app.AlgorithmDropDown.Value;
 
-                % 4. Execution
-                [Score, Position, ~] = app.RunGA(d, D, NP, NN, L, Din, Cost, Params, MaxGen);
+                % 4. Execution Router
+                if strcmp(SelectedAlg, 'Genetic Algorithm (GA)')
+                    [Score, Position, ~] = app.RunGA(d, D, NP, NN, L, Din, Cost, Params, MaxGen);
+                else
+                    [Score, Position, ~] = app.RunPSO(d, D, NP, NN, L, Din, Cost, Params, MaxGen);
+                end
 
                 app.BestCost = Score;
                 app.OptimalDiameters = Position';
@@ -148,7 +155,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 types = d.getNodeType();
                 junctions = strcmpi(types, 'JUNCTION');
 
-                % Force Column Vectors (:)
                 app.NodePressures = P(junctions);
                 app.NodePressures = app.NodePressures(:); 
 
@@ -219,7 +225,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.RunButton.Enable = 'on';
         end
 
-        % --- GA Engine (Fixed Penalty & Empty Solution Handling) ---
+        % --- GA Engine ---
         function [Score, Position, Conv] = RunGA(app, d, D, NP, NN, L, Din, Cost, Params, MaxGen)
             Problem.d = d; Problem.D = D; Problem.NP = NP;
             Problem.NN = NN; Problem.L = L; Problem.Din = Din;
@@ -228,8 +234,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             NS = Params.NS; Pc = 0.8; Pm = 0.03; ND = numel(D);
             Conv = zeros(MaxGen, 1);
             BestCostEver = Inf; BestSolEver = [];
-    
-            % Track best unfeasible solution as fallback
             BestViolEver = Inf; BestUnfeasibleSol = []; BestUnfeasibleCost = Inf;
 
             Pop = randi(ND, NP, NS);
@@ -255,7 +259,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     end
                 end
 
-                % Elitism
                 if ~isempty(BestSolEver)
                     NewPop(:, 1) = BestSolEver;
                 elseif ~isempty(BestUnfeasibleSol)
@@ -265,7 +268,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 Pop = NewPop;
                 [cost, viol, feas] = app.evaluate_pop(Pop, Problem);
 
-                % 1. Check Feasible Solutions
                 feasible_idx = find(feas);
                 if ~isempty(feasible_idx)
                     [min_c, k] = min(cost(feasible_idx));
@@ -275,7 +277,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     end
                 end
 
-                % 2. Track Best Solution by Minimum Violation (Fallback)
                 [min_v, idx_v] = min(viol);
                 if min_v < BestViolEver
                     BestViolEver = min_v;
@@ -283,7 +284,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     BestUnfeasibleCost = cost(idx_v);
                 end
 
-                % Record Convergence
                 if ~isempty(BestSolEver)
                     Conv(G) = BestCostEver;
                 else
@@ -294,23 +294,93 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     plot(app.UIAxes, 1:G, Conv(1:G), 'LineWidth', 2, 'Color', [0.85 0.32 0.1]);
                     xlabel(app.UIAxes, 'Generation');
                     ylabel(app.UIAxes, 'Best Cost ($)');
-                    title(app.UIAxes, sprintf('Convergence (Gen %d/%d)', G, MaxGen));
+                    title(app.UIAxes, sprintf('GA Convergence (Gen %d/%d)', G, MaxGen));
                     grid(app.UIAxes, 'on');
                     drawnow;
                 end
             end
 
-            % Final Fallback if no 100% feasible solution was found
             if isempty(BestSolEver)
                 BestSolEver = BestUnfeasibleSol;
                 BestCostEver = BestUnfeasibleCost;
                 uialert(app.UIFigure, ...
-                    'No fully feasible solution found for the given Vmax and Pmin limits. Displaying the solution with minimum constraint violation.', ...
-                    'Constraint Limit Alert', 'Icon', 'warning');
+                    'No fully feasible solution found. Displaying solution with minimum violation.', ...
+                    'Constraint Alert', 'Icon', 'warning');
             end
 
             Score = BestCostEver;
             Position = D(BestSolEver)';
+        end
+
+        % --- PSO Engine ---
+        function [Score, Position, Conv] = RunPSO(app, d, D, NP, NN, L, Din, Cost, Params, MaxGen)
+            Problem.d = d; Problem.D = D; Problem.NP = NP;
+            Problem.NN = NN; Problem.L = L; Problem.Din = Din;
+            Problem.Cost = Cost; Problem.Pmin = Params.Pmin; Problem.Vmax = Params.Vmax;
+
+            N = Params.NS; ND = numel(D);
+            w = 0.7; c1 = 1.5; c2 = 1.5;
+
+            % Particle Continuous Positions and Velocities
+            X = randi(ND, NP, N);
+            V = zeros(NP, N);
+
+            PBestX = X;
+            PBestCost = Inf(1, N);
+            PBestViol = Inf(1, N);
+
+            GBestX = []; GBestCost = Inf; GBestViol = Inf;
+            Conv = zeros(MaxGen, 1);
+
+            for G = 1:MaxGen
+                X_discrete = round(X);
+                X_discrete = max(1, min(ND, X_discrete));
+
+                [cost, viol, feas] = app.evaluate_pop(X_discrete, Problem);
+
+                for i = 1:N
+                    % Evaluate Personal Best
+                    if (feas(i) && cost(i) < PBestCost(i)) || (~feas(i) && viol(i) < PBestViol(i))
+                        PBestCost(i) = cost(i);
+                        PBestViol(i) = viol(i);
+                        PBestX(:, i)  = X_discrete(:, i);
+                    end
+
+                    % Evaluate Global Best
+                    if (feas(i) && cost(i) < GBestCost) || (~feas(i) && viol(i) < GBestViol)
+                        GBestCost = cost(i);
+                        GBestViol = viol(i);
+                        GBestX    = X_discrete(:, i);
+                    end
+                end
+
+                % Update Velocities and Positions
+                for i = 1:N
+                    r1 = rand(NP, 1); r2 = rand(NP, 1);
+                    V(:, i) = w * V(:, i) + c1 * r1 .* (PBestX(:, i) - X(:, i)) + c2 * r2 .* (GBestX - X(:, i));
+                    X(:, i) = X(:, i) + V(:, i);
+                end
+
+                Conv(G) = GBestCost;
+
+                if mod(G, 5) == 0 || G == MaxGen
+                    plot(app.UIAxes, 1:G, Conv(1:G), 'LineWidth', 2, 'Color', [0.0 0.45 0.74]);
+                    xlabel(app.UIAxes, 'Iteration');
+                    ylabel(app.UIAxes, 'Best Cost ($)');
+                    title(app.UIAxes, sprintf('PSO Convergence (Iter %d/%d)', G, MaxGen));
+                    grid(app.UIAxes, 'on');
+                    drawnow;
+                end
+            end
+
+            if GBestViol > 0
+                uialert(app.UIFigure, ...
+                    'No fully feasible solution found by PSO. Displaying solution with minimum violation.', ...
+                    'Constraint Alert', 'Icon', 'warning');
+            end
+
+            Score = GBestCost;
+            Position = D(GBestX)';
         end
 
         % --- Export Data to Excel ---
@@ -319,10 +389,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             if ischar(file)
                 fullFileName = fullfile(path, file);
                 
-                % Write Pipes sheet
                 writetable(app.UITablePipes.Data, fullFileName, 'Sheet', 'Pipe_Optimization');
-                
-                % Write Nodes sheet
                 writetable(app.UITableNodes.Data, fullFileName, 'Sheet', 'Hydraulic_Nodes');
                 
                 uialert(app.UIFigure, 'Pipes and Hydraulic Node results exported successfully!', 'Export Success');
@@ -388,35 +455,39 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
         function createComponents(app)
             % Main Figure
-            app.UIFigure = uifigure('Position', [100 100 980 640], 'Name', 'WDS Optimization Toolkit v1.3.0');
+            app.UIFigure = uifigure('Position', [100 100 980 660], 'Name', 'WDS Optimization Toolkit v1.4.0');
 
             % Panels
-            app.LeftPanel  = uipanel(app.UIFigure, 'Title', 'Input Controls & Constraints', 'Position', [10 10 300 620]);
-            app.RightPanel = uipanel(app.UIFigure, 'Title', 'Results & Hydraulic Analysis', 'Position', [320 10 650 620]);
+            app.LeftPanel  = uipanel(app.UIFigure, 'Title', 'Input Controls & Constraints', 'Position', [10 10 300 640]);
+            app.RightPanel = uipanel(app.UIFigure, 'Title', 'Results & Hydraulic Analysis', 'Position', [320 10 650 640]);
 
             % Left Panel - File Selection
-            app.INPButton  = uibutton(app.LeftPanel, 'push', 'Text', 'Load .INP File', 'Position', [20 550 120 28], 'ButtonPushedFcn', @(btn, e) SelectINPFile(app, e));
-            app.INPLabel   = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 550 130 28]);
+            app.INPButton  = uibutton(app.LeftPanel, 'push', 'Text', 'Load .INP File', 'Position', [20 570 120 28], 'ButtonPushedFcn', @(btn, e) SelectINPFile(app, e));
+            app.INPLabel   = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 570 130 28]);
 
-            app.DButton    = uibutton(app.LeftPanel, 'push', 'Text', 'Load D.txt', 'Position', [20 510 120 28], 'ButtonPushedFcn', @(btn, e) SelectDFile(app, e));
-            app.DLabel     = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 510 130 28]);
+            app.DButton    = uibutton(app.LeftPanel, 'push', 'Text', 'Load D.txt', 'Position', [20 530 120 28], 'ButtonPushedFcn', @(btn, e) SelectDFile(app, e));
+            app.DLabel     = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 530 130 28]);
 
-            app.CostButton = uibutton(app.LeftPanel, 'push', 'Text', 'Load Cost.txt', 'Position', [20 470 120 28], 'ButtonPushedFcn', @(btn, e) SelectCostFile(app, e));
-            app.CostLabel  = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 470 130 28]);
+            app.CostButton = uibutton(app.LeftPanel, 'push', 'Text', 'Load Cost.txt', 'Position', [20 490 120 28], 'ButtonPushedFcn', @(btn, e) SelectCostFile(app, e));
+            app.CostLabel  = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 490 130 28]);
+
+            % Algorithm Selection
+            app.AlgorithmDropDownLabel = uilabel(app.LeftPanel, 'Text', 'Algorithm:', 'Position', [20 440 100 22], 'FontWeight', 'bold');
+            app.AlgorithmDropDown      = uidropdown(app.LeftPanel, 'Position', [130 440 140 22], 'Items', {'Genetic Algorithm (GA)', 'Particle Swarm (PSO)'});
 
             % Algorithm Parameters
-            app.NSEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Population (NS):', 'Position', [20 415 130 22]);
-            app.NSEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 415 100 22], 'Value', 100);
+            app.NSEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Population / Swarm:', 'Position', [20 400 130 22]);
+            app.NSEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 400 100 22], 'Value', 100);
 
-            app.MaxGenEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Max Gen:', 'Position', [20 380 130 22]);
-            app.MaxGenEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 380 100 22], 'Value', 500);
+            app.MaxGenEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Max Gen / Iter:', 'Position', [20 365 130 22]);
+            app.MaxGenEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 365 100 22], 'Value', 500);
 
             % Constraints Controls
-            app.PminEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Min Pressure (m):', 'Position', [20 330 130 22], 'FontWeight', 'bold');
-            app.PminEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 330 100 22], 'Value', 30.0);
+            app.PminEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Min Pressure (m):', 'Position', [20 315 130 22], 'FontWeight', 'bold');
+            app.PminEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 315 100 22], 'Value', 30.0);
 
-            app.VmaxEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Max Velocity (m/s):', 'Position', [20 295 130 22], 'FontWeight', 'bold');
-            app.VmaxEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 295 100 22], 'Value', 2.5);
+            app.VmaxEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Max Velocity (m/s):', 'Position', [20 280 130 22], 'FontWeight', 'bold');
+            app.VmaxEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 280 100 22], 'Value', 2.5);
 
             % Action Buttons
             app.RunButton    = uibutton(app.LeftPanel, 'push', 'Text', 'Run Optimization', 'Position', [20 170 250 42], 'BackgroundColor', [0.1 0.6 0.2], 'FontColor', 'w', 'FontSize', 14, 'FontWeight', 'bold', 'ButtonPushedFcn', @(btn, e) RunOptimization(app, e));
@@ -425,19 +496,19 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.StatusLabel  = uilabel(app.LeftPanel, 'Text', 'Status: Ready', 'Position', [20 30 260 30], 'FontWeight', 'bold');
 
             % Tab Group in Right Panel
-            app.TabGroup     = uitabgroup(app.RightPanel, 'Position', [10 10 630 580]);
+            app.TabGroup     = uitabgroup(app.RightPanel, 'Position', [10 10 630 600]);
             app.CostTab      = uitab(app.TabGroup, 'Title', 'Optimization & Costs');
             app.HydraulicsTab= uitab(app.TabGroup, 'Title', 'Hydraulic Results');
 
             % Tab 1 Components
-            app.UIAxes           = uiaxes(app.CostTab, 'Position', [10 220 600 320]);
-            app.UITablePipes     = uitable(app.CostTab, 'Position', [10 20 380 180]);
-            app.CostSummaryLabel = uilabel(app.CostTab, 'Text', 'Optimal Cost: $ -', 'Position', [410 95 200 30], 'FontSize', 12, 'FontWeight', 'bold');
+            app.UIAxes           = uiaxes(app.CostTab, 'Position', [10 230 600 330]);
+            app.UITablePipes     = uitable(app.CostTab, 'Position', [10 20 380 190]);
+            app.CostSummaryLabel = uilabel(app.CostTab, 'Text', 'Optimal Cost: $ -', 'Position', [410 100 200 30], 'FontSize', 12, 'FontWeight', 'bold');
 
-            % Tab 2 Components (Plots & Table Layout)
-            app.PressureAxes     = uiaxes(app.HydraulicsTab, 'Position', [10 280 360 260]);
-            app.VelocityAxes     = uiaxes(app.HydraulicsTab, 'Position', [10 10 360 260]);
-            app.UITableNodes     = uitable(app.HydraulicsTab, 'Position', [380 50 235 490]);
+            % Tab 2 Components
+            app.PressureAxes     = uiaxes(app.HydraulicsTab, 'Position', [10 290 360 270]);
+            app.VelocityAxes     = uiaxes(app.HydraulicsTab, 'Position', [10 10 360 270]);
+            app.UITableNodes     = uitable(app.HydraulicsTab, 'Position', [380 50 235 510]);
             app.NodeStatusLabel  = uilabel(app.HydraulicsTab, 'Text', 'Min P: - | Max V: -', 'Position', [380 10 235 30], 'FontSize', 11, 'FontWeight', 'bold');
         end
     end

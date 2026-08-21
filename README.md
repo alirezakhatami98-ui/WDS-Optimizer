@@ -1,23 +1,23 @@
-# WDS Optimization Toolkit (v1.3.0)
+# WDS Optimization Toolkit (v1.4.0)
 
-A MATLAB-based Water Distribution Network (WDS) Optimization and Hydraulic Analysis Tool powered by EPANET C-API and Genetic Algorithm (GA).
+A MATLAB-based Water Distribution Network (WDS) Optimization and Hydraulic Analysis Tool powered by EPANET C-API, Genetic Algorithm (GA), and Particle Swarm Optimization (PSO).
 
 ---
 
-## 🌟 What's New in v1.3.0
+## 🌟 What's New in v1.4.0
 
-* **Dual Hydraulic Constraints Support**: Integrated Maximum Pipe Velocity ($V_{\max}$) penalty function alongside Minimum Junction Pressure ($P_{\min}$) constraints in the GA optimization engine.
-* **Fully Internationalized Codebase**: Complete transition to English for all GUI components, warning dialogs, and code documentation.
-* **Dynamic Hydraulic Plots**: Real-time reference lines for user-defined $P_{\min}$ and $V_{\max}$ limits on pressure and velocity distribution charts.
-* **Enhanced Excel Export**: Export pipe sizes, velocities, and node pressure distributions into structured multi-sheet Excel workbooks.
+* **Multi-Algorithm Optimization**: Added drop-down selection support to choose between **Genetic Algorithm (GA)** and **Particle Swarm Optimization (PSO)** engines for comparative heuristic analysis.
+* **Discrete PSO Implementation**: Tailored continuous-to-discrete particle position mapping for commercial pipe diameter profiles.
+* **Dual Hydraulic Constraints**: Simultaneous pressure ($P_{\min}$) and velocity ($V_{\max}$) penalty functions across both algorithms.
+* **100% English Localization**: Fully internationalized UI labels, dialog alerts, and exported tables.
 
 ---
 
 ## 🛠️ Features
 
-* **Genetic Algorithm Engine**: Optimizes pipe network diameters to minimize total investment costs subject to hydraulic velocity and pressure constraints.
-* **EPANET C-DLL Integration**: Directly executes native EPANET hydraulic solver routines.
-* **Tabbed GUI Interface**: Separate views for Convergence Profile, Cost Summary, and Hydraulic Plots/Tables.
+* **GA & PSO Solvers**: Benchmarking metaheuristics for pipe diameter cost optimization.
+* **EPANET C-DLL Integration**: Performs fast, dynamic hydraulic network simulations.
+* **Tabbed Graphical Interface**: Real-time convergence monitoring, pipe diameter sizing, and node pressure/pipe velocity charts.
 
 ---
 
@@ -27,10 +27,13 @@ A MATLAB-based Water Distribution Network (WDS) Optimization and Hydraulic Analy
 2. Launch the application:
    ```matlab
    WDS_Optimizer_App
-   ```
-3. Load the input files (`.inp` network file, `D.txt` diameter set, and `Cost.txt` cost profile).
-4. Set Algorithm Parameters (Population Size, Max Generations) and Constraints ($P_{\min}$, $V_{\max}$).
-5. Click **Run Optimization**.
+
+```
+
+3. Select preferred algorithm (**GA** or **PSO**).
+4. Load input files (`.inp`, `D.txt`, and `Cost.txt`).
+5. Configure parameters and constraints ($P_{\min}$, $V_{\max}$).
+6. Click **Run Optimization**.
 
 ---
 
@@ -44,4 +47,5 @@ A MATLAB-based Water Distribution Network (WDS) Optimization and Hydraulic Analy
 ---
 
 ## 📜 License
+
 This project is open-source under the MIT License.
