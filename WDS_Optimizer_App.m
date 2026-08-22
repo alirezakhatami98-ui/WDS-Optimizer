@@ -28,6 +28,10 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         VmaxEditField         matlab.ui.control.NumericEditField
         VmaxEditFieldLabel    matlab.ui.control.Label
         
+        % Fixed Pipes Controls
+        FixedPipesEditField   matlab.ui.control.EditField
+        FixedPipesLabel       matlab.ui.control.Label
+
         RunButton             matlab.ui.control.Button
         ExportButton          matlab.ui.control.Button
         StatusLabel           matlab.ui.control.Label
@@ -111,7 +115,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 Cost = load(app.CostFileStr);
                 D    = Din * 25.4; % Convert inches to mm
 
-                % Safe copy to root drive or pwd to prevent path space issues with EPANET DLL
                 try
                     tempInpPath = 'C:\temp_network.inp';
                     copyfile(app.InpFileStr, tempInpPath, 'f');
@@ -126,18 +129,38 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 NN = d.getNodeCount();
 
                 L = zeros(NP, 1);
+                InitialD = zeros(NP, 1);
                 for i = 1:NP
                     L(i) = d.getLinkLength(i);
+                    InitialD(i) = d.getLinkDiameter(i);
                 end
 
-                % 3. Read Algorithm Params & User Constraints
+                % 3. Parse Fixed Pipe IDs (Fixed with strtrim)
+                fixedStr = strtrim(app.FixedPipesEditField.Value);
+                fixedPipes = [];
+                if ~isempty(fixedStr)
+                    try
+                        fixedPipes = str2num(fixedStr); %#ok<ST2NM>
+                        fixedPipes = fixedPipes(fixedPipes >= 1 & fixedPipes <= NP);
+                    catch
+                        fixedPipes = [];
+                    end
+                end
+                
+                variablePipes = setdiff(1:NP, fixedPipes);
+
+                % 4. Read Parameters & Constraints
                 Params.NS   = app.NSEditField.Value;
                 Params.Pmin = app.PminEditField.Value;
                 Params.Vmax = app.VmaxEditField.Value;
+                Params.FixedPipes = fixedPipes;
+                Params.VariablePipes = variablePipes;
+                Params.InitialD = InitialD;
+
                 MaxGen      = app.MaxGenEditField.Value;
                 SelectedAlg = app.AlgorithmDropDown.Value;
 
-                % 4. Execution Router
+                % 5. Execution Router
                 if strcmp(SelectedAlg, 'Genetic Algorithm (GA)')
                     [Score, Position, ~] = app.RunGA(d, D, NP, NN, L, Din, Cost, Params, MaxGen);
                 else
@@ -147,7 +170,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 app.BestCost = Score;
                 app.OptimalDiameters = Position';
 
-                % 5. Post-Processing Hydraulic Analysis
+                % 6. Post-Processing Hydraulic Analysis
                 d.setLinkDiameter(1:NP, app.OptimalDiameters);
                 d.solveCompleteHydraulics();
 
@@ -198,7 +221,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 app.NodeStatusLabel.Text = sprintf('Min P: %.2fm | Max V: %.2fm/s', minP, maxV);
 
                 % --- Hydraulic Plots ---
-                % 1. Node Pressure Bar Plot
                 bar(app.PressureAxes, 1:numNodes, app.NodePressures, 0.6, 'FaceColor', [0 0.45 0.74]);
                 yline(app.PressureAxes, pMinVal, '--r', sprintf('Pmin (%.1fm)', pMinVal), 'LineWidth', 1.5, 'FontWeight', 'bold');
                 xlabel(app.PressureAxes, 'Node ID');
@@ -206,7 +228,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 title(app.PressureAxes, 'Node Pressure Profile');
                 grid(app.PressureAxes, 'on');
 
-                % 2. Pipe Velocity Bar Plot
                 bar(app.VelocityAxes, 1:NP, app.PipeVelocities, 0.6, 'FaceColor', [0.47 0.67 0.19]);
                 yline(app.VelocityAxes, vMaxVal, '--r', sprintf('Vmax (%.1fm/s)', vMaxVal), 'LineWidth', 1.5, 'FontWeight', 'bold');
                 xlabel(app.VelocityAxes, 'Pipe ID');
@@ -230,13 +251,17 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             Problem.d = d; Problem.D = D; Problem.NP = NP;
             Problem.NN = NN; Problem.L = L; Problem.Din = Din;
             Problem.Cost = Cost; Problem.Pmin = Params.Pmin; Problem.Vmax = Params.Vmax;
+            Problem.FixedPipes = Params.FixedPipes;
+            Problem.VariablePipes = Params.VariablePipes;
+            Problem.InitialD = Params.InitialD;
 
             NS = Params.NS; Pc = 0.8; Pm = 0.03; ND = numel(D);
+            NVar = numel(Problem.VariablePipes);
             Conv = zeros(MaxGen, 1);
             BestCostEver = Inf; BestSolEver = [];
             BestViolEver = Inf; BestUnfeasibleSol = []; BestUnfeasibleCost = Inf;
 
-            Pop = randi(ND, NP, NS);
+            Pop = randi(ND, NVar, NS);
             [cost, viol, feas] = app.evaluate_pop(Pop, Problem);
 
             for G = 1:MaxGen
@@ -246,15 +271,15 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 NewPop = MatingPool;
                 for i = 1:2:NS-1
-                    if rand < Pc
-                        cp = randi(NP - 1);
+                    if rand < Pc && NVar > 1
+                        cp = randi(NVar - 1);
                         NewPop(:, i)   = [MatingPool(1:cp, i); MatingPool(cp+1:end, i+1)];
                         NewPop(:, i+1) = [MatingPool(1:cp, i+1); MatingPool(cp+1:end, i)];
                     end
                 end
 
                 for i = 1:NS
-                    for j = 1:NP
+                    for j = 1:NVar
                         if rand < Pm, NewPop(j, i) = randi(ND); end
                     end
                 end
@@ -309,7 +334,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             end
 
             Score = BestCostEver;
-            Position = D(BestSolEver)';
+            FullDiameters = Problem.InitialD;
+            FullDiameters(Problem.VariablePipes) = D(BestSolEver);
+            Position = FullDiameters';
         end
 
         % --- PSO Engine ---
@@ -317,13 +344,15 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             Problem.d = d; Problem.D = D; Problem.NP = NP;
             Problem.NN = NN; Problem.L = L; Problem.Din = Din;
             Problem.Cost = Cost; Problem.Pmin = Params.Pmin; Problem.Vmax = Params.Vmax;
+            Problem.FixedPipes = Params.FixedPipes;
+            Problem.VariablePipes = Params.VariablePipes;
+            Problem.InitialD = Params.InitialD;
 
-            N = Params.NS; ND = numel(D);
+            N = Params.NS; ND = numel(D); NVar = numel(Problem.VariablePipes);
             w = 0.7; c1 = 1.5; c2 = 1.5;
 
-            % Particle Continuous Positions and Velocities
-            X = randi(ND, NP, N);
-            V = zeros(NP, N);
+            X = randi(ND, NVar, N);
+            V = zeros(NVar, N);
 
             PBestX = X;
             PBestCost = Inf(1, N);
@@ -339,14 +368,12 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 [cost, viol, feas] = app.evaluate_pop(X_discrete, Problem);
 
                 for i = 1:N
-                    % Evaluate Personal Best
                     if (feas(i) && cost(i) < PBestCost(i)) || (~feas(i) && viol(i) < PBestViol(i))
                         PBestCost(i) = cost(i);
                         PBestViol(i) = viol(i);
                         PBestX(:, i)  = X_discrete(:, i);
                     end
 
-                    % Evaluate Global Best
                     if (feas(i) && cost(i) < GBestCost) || (~feas(i) && viol(i) < GBestViol)
                         GBestCost = cost(i);
                         GBestViol = viol(i);
@@ -354,9 +381,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     end
                 end
 
-                % Update Velocities and Positions
                 for i = 1:N
-                    r1 = rand(NP, 1); r2 = rand(NP, 1);
+                    r1 = rand(NVar, 1); r2 = rand(NVar, 1);
                     V(:, i) = w * V(:, i) + c1 * r1 .* (PBestX(:, i) - X(:, i)) + c2 * r2 .* (GBestX - X(:, i));
                     X(:, i) = X(:, i) + V(:, i);
                 end
@@ -380,7 +406,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             end
 
             Score = GBestCost;
-            Position = D(GBestX)';
+            FullDiameters = Problem.InitialD;
+            FullDiameters(Problem.VariablePipes) = D(GBestX);
+            Position = FullDiameters';
         end
 
         % --- Export Data to Excel ---
@@ -396,7 +424,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             end
         end
 
-        % --- GA Helpers ---
+        % --- Helpers ---
         function Fitness = calculate_fitness(~, cost, viol)
             Fitness = 1 ./ (cost + 2e6 * (viol .^ 2) + 1e-6);
         end
@@ -422,8 +450,11 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             d = Problem.d; D = Problem.D; NP = Problem.NP; L = Problem.L;
             Din = Problem.Din; Cost = Problem.Cost; 
             Pmin = Problem.Pmin; Vmax = Problem.Vmax;
+            
+            FullD = Problem.InitialD;
+            FullD(Problem.VariablePipes) = D(ind);
 
-            d.setLinkDiameter(1:NP, D(ind)');
+            d.setLinkDiameter(1:NP, FullD');
             d.solveCompleteHydraulics();
             
             P = d.getNodePressure();
@@ -433,15 +464,13 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             V = d.getLinkVelocity();
             Vpipes = abs(V(1:NP));
 
-            % Cost Calculation
             cost = 0;
-            for i = 1:NP
+            for i = Problem.VariablePipes
                 Dmm = Din * 25.4;
-                [~, idx] = min(abs(Dmm - D(ind(i))));
+                [~, idx] = min(abs(Dmm - FullD(i)));
                 cost = cost + L(i) * Cost(idx);
             end
 
-            % Dual Constraint Violations (Pressure + Velocity)
             p_viol = sum(max(0, Pmin - Pj));
             v_viol = sum(max(0, Vpipes - Vmax));
             
@@ -454,14 +483,12 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
     methods (Access = private)
 
         function createComponents(app)
-            % Main Figure
-            app.UIFigure = uifigure('Position', [100 100 980 660], 'Name', 'WDS Optimization Toolkit v1.4.0');
+            app.UIFigure = uifigure('Position', [100 100 980 660], 'Name', 'WDS Optimization Toolkit v1.5.0');
 
-            % Panels
             app.LeftPanel  = uipanel(app.UIFigure, 'Title', 'Input Controls & Constraints', 'Position', [10 10 300 640]);
             app.RightPanel = uipanel(app.UIFigure, 'Title', 'Results & Hydraulic Analysis', 'Position', [320 10 650 640]);
 
-            % Left Panel - File Selection
+            % File Selection
             app.INPButton  = uibutton(app.LeftPanel, 'push', 'Text', 'Load .INP File', 'Position', [20 570 120 28], 'ButtonPushedFcn', @(btn, e) SelectINPFile(app, e));
             app.INPLabel   = uilabel(app.LeftPanel, 'Text', 'No file selected', 'Position', [150 570 130 28]);
 
@@ -489,13 +516,17 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.VmaxEditFieldLabel = uilabel(app.LeftPanel, 'Text', 'Max Velocity (m/s):', 'Position', [20 280 130 22], 'FontWeight', 'bold');
             app.VmaxEditField      = uieditfield(app.LeftPanel, 'numeric', 'Position', [160 280 100 22], 'Value', 2.5);
 
+            % Fixed Pipes Input
+            app.FixedPipesLabel     = uilabel(app.LeftPanel, 'Text', 'Fixed Pipe IDs (e.g. 1, 3):', 'Position', [20 235 150 22], 'FontWeight', 'bold');
+            app.FixedPipesEditField = uieditfield(app.LeftPanel, 'text', 'Position', [170 235 90 22], 'Value', '');
+
             % Action Buttons
-            app.RunButton    = uibutton(app.LeftPanel, 'push', 'Text', 'Run Optimization', 'Position', [20 170 250 42], 'BackgroundColor', [0.1 0.6 0.2], 'FontColor', 'w', 'FontSize', 14, 'FontWeight', 'bold', 'ButtonPushedFcn', @(btn, e) RunOptimization(app, e));
-            app.ExportButton = uibutton(app.LeftPanel, 'push', 'Text', 'Export Excel (Multi-Sheet)', 'Position', [20 110 250 38], 'Enable', 'off', 'ButtonPushedFcn', @(btn, e) ExportToExcel(app, e));
+            app.RunButton    = uibutton(app.LeftPanel, 'push', 'Text', 'Run Optimization', 'Position', [20 150 250 42], 'BackgroundColor', [0.1 0.6 0.2], 'FontColor', 'w', 'FontSize', 14, 'FontWeight', 'bold', 'ButtonPushedFcn', @(btn, e) RunOptimization(app, e));
+            app.ExportButton = uibutton(app.LeftPanel, 'push', 'Text', 'Export Excel (Multi-Sheet)', 'Position', [20 95 250 38], 'Enable', 'off', 'ButtonPushedFcn', @(btn, e) ExportToExcel(app, e));
 
-            app.StatusLabel  = uilabel(app.LeftPanel, 'Text', 'Status: Ready', 'Position', [20 30 260 30], 'FontWeight', 'bold');
+            app.StatusLabel  = uilabel(app.LeftPanel, 'Text', 'Status: Ready', 'Position', [20 20 260 30], 'FontWeight', 'bold');
 
-            % Tab Group in Right Panel
+            % Tab Group
             app.TabGroup     = uitabgroup(app.RightPanel, 'Position', [10 10 630 600]);
             app.CostTab      = uitab(app.TabGroup, 'Title', 'Optimization & Costs');
             app.HydraulicsTab= uitab(app.TabGroup, 'Title', 'Hydraulic Results');
