@@ -1,48 +1,40 @@
-# WDS Optimization Toolkit (v1.5.0)
+# WDS Optimization Toolkit (v1.6.0)
 
-A MATLAB-based Water Distribution Network (WDS) Optimization and Hydraulic Analysis Tool powered by EPANET C-API, Genetic Algorithm (GA), and Particle Swarm Optimization (PSO).
-
----
-
-## 🌟 What's New in v1.5.0
-
-* **Fixed Pipe Diameter Constraints**: Specify fixed pipe IDs (e.g., existing infrastructure) to exclude them from the optimization search space while preserving their initial diameters from the `.inp` file.
-* **Multi-Algorithm Support**: Seamlessly switch between **Genetic Algorithm (GA)** and **Particle Swarm Optimization (PSO)** engines for metaheuristic benchmarking.
-* **Dual Hydraulic Constraints**: Dynamic penalty logic supporting node minimum pressure ($P_{\min}$) and pipe maximum velocity ($V_{\max}$) constraints.
-* **Empty Solution Fallback**: Prevents execution errors when no 100% feasible solution is found by returning the candidate with minimum constraint violation alongside visual alerts.
-* **Excel Exporting**: Multi-sheet output containing optimized pipe sizing, flow velocities, and junction pressure profiles.
+A MATLAB-based Water Distribution Network (WDS) Optimization, Hydraulic Benchmark, and Analysis Tool powered by EPANET C-API, Genetic Algorithm (GA), and Particle Swarm Optimization (PSO).
 
 ---
 
-## 🛠️ Features
+## 🌟 What's New in v1.6.0
 
-* **Flexible Variable Sizing**: Supports rehabilitation and expansion projects by fixing existing pipes and optimizing new ones.
-* **EPANET C-DLL Engine**: Performs high-speed dynamic hydraulic simulation directly from MATLAB.
-* **Tabbed Interface**: Monitor real-time convergence curves, pipe sizing tables, and hydraulic node/pipe bar plots.
+* **Headloss Formula Selection**: Choose dynamically between **Hazen-Williams (HW)**, **Darcy-Weisbach (DW)**, and **Manning (CM)** friction models directly from the UI.
+* **GA vs. PSO Benchmark Engine**: Dedicated evaluation tab with single-click comparative runs plotting dual convergence curves and side-by-side metric tables (Cost, Execution Time, Hydraulic Limits).
+* **Multi-Sheet Benchmark Export**: Seamless export of comparative algorithm metrics alongside pipe and node hydraulic outputs to Excel.
+* **Fixed Pipe Constraints**: Retained full support for fixed infrastructure IDs during optimizations.
 
 ---
 
-## 🚀 How to Run
+## 🛠️ Key Features
 
-1. Open MATLAB and set the project directory as the active path.
-2. Run the application command:
+* **Headloss Physics Engine**: Full EPANET C-DLL integration with selectable friction formulation.
+* **Algorithmic Benchmarking**: Direct performance comparison between Genetic Algorithm (GA) and Particle Swarm Optimization (PSO).
+* **Hydraulic Constraints**: Dynamic pressure ($P_{\min}$) and velocity ($V_{\max}$) penalty function enforcement.
+* **Interactive UI**: Real-time convergence animation, dual hydraulic profiles, and comprehensive multi-sheet Excel reporting.
+
+---
+
+## 🚀 How to Run & Test
+
+1. Open MATLAB and navigate to the repository directory.
+2. Run the application:
    ```matlab
    WDS_Optimizer_App
-   ```
-3. Load required input files (`.inp`, `D.txt`, and `Cost.txt`).
-4. Select the desired metaheuristic algorithm (**GA** or **PSO**).
-5. (Optional) Enter fixed pipe IDs in the **Fixed Pipe IDs** field (e.g., `1, 3` or `1:3`).
-6. Set pressure and velocity constraints ($P_{\min}$, $V_{\max}$).
-7. Click **Run Optimization**.
 
----
+```
 
-## 📁 Repository Structure
-
-* `WDS_Optimizer_App.m` - Core MATLAB AppDesigner application.
-* `2Loops.inp` - Sample EPANET water distribution network.
-* `D.txt` - Commercial pipe diameters profile (inches).
-* `Cost.txt` - Pipe unit cost table ($/m).
+3. Load input files (`.inp`, `D.txt`, and `Cost.txt`).
+4. Select the friction formulation (**Hazen-Williams**, **Darcy-Weisbach**, or **Manning**).
+5. Choose an algorithm and click **Run Single Optimization**, OR click **Run GA vs PSO Benchmark** to compare both engines side-by-side.
+6. Export comprehensive Excel reports from the export button.
 
 ---
 
