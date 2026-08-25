@@ -516,11 +516,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             Pj = P(strcmpi(d.getNodeType(), 'JUNCTION'));
             Vpipes = abs(d.getLinkVelocity());
 
-            cost = 0;
-            for i = Problem.VariablePipes
-                [~, idx] = min(abs((Din * 25.4) - FullD(i)));
-                cost = cost + L(i) * Cost(idx);
-            end
+            cost = calculateCost(FullD, Problem.VariablePipes, Din, Cost, L);
 
             viol = sum(max(0, Pmin - Pj)) + sum(max(0, Vpipes - Vmax));
             feas = (viol == 0);

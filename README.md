@@ -29,7 +29,7 @@ A MATLAB-based Water Distribution Network (WDS) Optimization, Hydraulic Benchmar
    ```matlab
    WDS_Optimizer_App
 
-```
+   ```
 
 3. Load input files (`.inp`, `D.txt`, and `Cost.txt`).
 4. Select the friction formulation (**Hazen-Williams**, **Darcy-Weisbach**, or **Manning**).
