@@ -363,7 +363,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             for G = 1:MaxGen
                 Fitness = calculateFitness(cost, viol);
-                SelectedIdx = app.selection_roulette(Fitness, NS);
+                SelectedIdx = selectionRoulette(Fitness, NS);
                 MatingPool = Pop(:, SelectedIdx);
 
                 NewPop = MatingPool;
@@ -488,12 +488,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         end
 
         % --- Evaluation Helpers ---
-        
-        function idx = selection_roulette(~, Fitness, NS)
-            prob = Fitness / sum(Fitness); cum_prob = cumsum(prob); idx = zeros(1, NS);
-            for i = 1:NS, idx(i) = find(rand <= cum_prob, 1, 'first'); end
-        end
-
+                
         function [cost, viol, feas] = evaluate_pop(app, Pop, Problem)
             NS = size(Pop, 2); cost = zeros(NS, 1); viol = zeros(NS, 1); feas = false(NS, 1);
             for i = 1:NS, [cost(i), viol(i), feas(i)] = app.evaluate_ind(Pop(:, i), Problem); end
