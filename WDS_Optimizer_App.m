@@ -509,12 +509,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             FullD = Problem.InitialD;
             FullD(Problem.VariablePipes) = D(ind);
 
-            d.setLinkDiameter(1:NP, FullD');
-            d.solveCompleteHydraulics();
-            
-            P = d.getNodePressure();
-            Pj = P(strcmpi(d.getNodeType(), 'JUNCTION'));
-            Vpipes = abs(d.getLinkVelocity());
+            [Pj, Vpipes] = runHydraulicSimulation(d, NP, FullD);
 
             cost = calculateCost(FullD, Problem.VariablePipes, Din, Cost, L);
 
