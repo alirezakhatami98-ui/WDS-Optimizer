@@ -518,8 +518,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             cost = calculateCost(FullD, Problem.VariablePipes, Din, Cost, L);
 
-            viol = sum(max(0, Pmin - Pj)) + sum(max(0, Vpipes - Vmax));
-            feas = (viol == 0);
+            [viol, feas] = checkConstraints(Pj, Vpipes, Pmin, Vmax);
         end
     end
 
