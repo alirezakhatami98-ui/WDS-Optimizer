@@ -359,7 +359,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             BestCostEver = Inf; BestSolEver = []; BestViolEver = Inf; BestUnfeasibleSol = []; BestUnfeasibleCost = Inf;
 
             Pop = randi(ND, NVar, NS);
-            [cost, viol, feas] = app.evaluate_pop(Pop, Problem);
+            [cost, viol, feas] = evaluatePopulation(Pop, Problem);
 
             for G = 1:MaxGen
                 Fitness = calculateFitness(cost, viol);
@@ -385,7 +385,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 elseif ~isempty(BestUnfeasibleSol), NewPop(:, 1) = BestUnfeasibleSol; end
 
                 Pop = NewPop;
-                [cost, viol, feas] = app.evaluate_pop(Pop, Problem);
+                [cost, viol, feas] = evaluatePopulation(Pop, Problem);
 
                 feasible_idx = find(feas);
                 if ~isempty(feasible_idx)
@@ -440,7 +440,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             for G = 1:MaxGen
                 X_discrete = round(X); X_discrete = max(1, min(ND, X_discrete));
-                [cost, viol, feas] = app.evaluate_pop(X_discrete, Problem);
+                [cost, viol, feas] = evaluatePopulation(X_discrete, Problem);
 
                 for i = 1:N
                     if (feas(i) && cost(i) < PBestCost(i)) || (~feas(i) && viol(i) < PBestViol(i))
@@ -487,13 +487,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             end
         end
 
-        % --- Evaluation Helpers ---
-                
-        function [cost, viol, feas] = evaluate_pop(app, Pop, Problem)
-            NS = size(Pop, 2); cost = zeros(NS, 1); viol = zeros(NS, 1); feas = false(NS, 1);
-            for i = 1:NS, [cost(i), viol(i), feas(i)] = app.evaluate_ind(Pop(:, i), Problem); end
-        end
-
+        % --- Evaluation Helpers ---     
+        
         function [cost, viol, feas] = evaluate_ind(~, ind, Problem)
             
             [cost, viol, feas] = evaluateSolution(ind, Problem);
