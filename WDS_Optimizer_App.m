@@ -165,10 +165,30 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 [d, Din, Cost, D, NP, L, InitialD, Params, MaxGen] = app.PrepareEnvironment();
                 
                 SelectedAlg = app.AlgorithmDropDown.Value;
+
                 if strcmp(SelectedAlg, 'Genetic Algorithm (GA)')
-                    [Score, Position, ~] = runGA(d, D, NP, L, Din, Cost, Params, MaxGen);
+
+                    [Score, Position, Conv] = ...
+                        runGA(d, D, NP, L, Din, Cost, Params, MaxGen);
+
                 else
-                    [Score, Position, ~] = app.RunPSO(d, D, NP, L, Din, Cost, Params, MaxGen);
+
+                    [Score, Position, ~] = ...
+                        app.RunPSO(d, D, NP, L, Din, Cost, Params, MaxGen);
+
+                end
+
+                if strcmp(SelectedAlg, 'Genetic Algorithm (GA)')
+
+                    plot(app.UIAxes, 1:MaxGen, Conv, ...
+                        'LineWidth', 2, ...
+                        'Color', [0.85 0.32 0.1]);
+
+                    xlabel(app.UIAxes, 'Generation');
+                    ylabel(app.UIAxes, 'Best Cost ($)');
+                    title(app.UIAxes, 'GA Convergence');
+                    grid(app.UIAxes, 'on');
+
                 end
 
                 app.UpdateGUIResults(d, Score, Position, NP, Params);
