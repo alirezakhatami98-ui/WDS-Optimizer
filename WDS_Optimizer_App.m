@@ -474,7 +474,3 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         end
     end
 end
-
-function val = ternary(cond, trueVal, falseVal)
-    if cond, val = trueVal; else, val = falseVal; end
-end
