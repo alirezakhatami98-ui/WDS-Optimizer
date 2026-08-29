@@ -236,9 +236,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
         % --- Environment Setup Helper ---
         function [d, Din, Cost, D, NP, L, InitialD, Params, MaxGen] = PrepareEnvironment(app)
-            Din  = load(app.DFileStr);
-            Cost = load(app.CostFileStr);
-            D    = Din * 25.4;
+            
+            [Din, Cost, D] = loadOptimizationData( ...
+                app.DFileStr, app.CostFileStr);
 
             try
                 tempInpPath = 'C:\temp_network.inp';
