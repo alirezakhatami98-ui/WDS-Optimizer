@@ -252,33 +252,16 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             UpdateInpHeadlossFormula(tempInpPath, app.HeadlossDropDown.Value);
 
             % 2. Load the updated INP file in EPANET
-            d = epanet(tempInpPath);
+            [d, NP, L, InitialD] = initializeNetwork(tempInpPath);
 
-            NP = d.getLinkPipeCount();
-            L = zeros(NP, 1);
-            InitialD = zeros(NP, 1);
-            for i = 1:NP
-                L(i) = d.getLinkLength(i);
-                InitialD(i) = d.getLinkDiameter(i);
-            end
+            Params = buildOptimizationParams( ...
+                app.NSEditField.Value, ...
+                app.PminEditField.Value, ...
+                app.VmaxEditField.Value, ...
+                app.FixedPipesEditField.Value, ...
+                NP, ...
+                InitialD);
 
-            fixedStr = strtrim(app.FixedPipesEditField.Value);
-            fixedPipes = [];
-            if ~isempty(fixedStr)
-                try
-                    fixedPipes = str2num(fixedStr); %#ok<ST2NM>
-                    fixedPipes = fixedPipes(fixedPipes >= 1 & fixedPipes <= NP);
-                catch
-                    fixedPipes = [];
-                end
-            end
-
-            Params.NS   = app.NSEditField.Value;
-            Params.Pmin = app.PminEditField.Value;
-            Params.Vmax = app.VmaxEditField.Value;
-            Params.FixedPipes = fixedPipes;
-            Params.VariablePipes = setdiff(1:NP, fixedPipes);
-            Params.InitialD = InitialD;
             MaxGen = app.MaxGenEditField.Value;
         end
 
