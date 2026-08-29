@@ -171,14 +171,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     [Score, Position, Conv] = ...
                         runGA(d, D, NP, L, Din, Cost, Params, MaxGen);
 
-                else
-
-                    [Score, Position, Conv] = runPSO(d, D, NP, L, Din, Cost, Params, MaxGen);
-
-                end
-
-                if strcmp(SelectedAlg, 'Genetic Algorithm (GA)')
-
                     plot(app.UIAxes, 1:MaxGen, Conv, ...
                         'LineWidth', 2, ...
                         'Color', [0.85 0.32 0.1]);
@@ -188,8 +180,22 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     title(app.UIAxes, 'GA Convergence');
                     grid(app.UIAxes, 'on');
 
-                end
+                else
 
+                    [Score, Position, Conv] = ...
+                        runPSO(d, D, NP, L, Din, Cost, Params, MaxGen);
+
+                    plot(app.UIAxes, 1:MaxGen, Conv, ...
+                        'LineWidth', 2, ...
+                        'Color', [0.0 0.45 0.74]);
+
+                    xlabel(app.UIAxes, 'Iteration');
+                    ylabel(app.UIAxes, 'Best Cost ($)');
+                    title(app.UIAxes, 'PSO Convergence');
+                    grid(app.UIAxes, 'on');
+
+                end
+         
                 app.UpdateGUIResults(d, Score, Position, NP, Params);
                 d.unload();
 
