@@ -275,21 +275,14 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.CostSummaryLabel.Text = sprintf('Optimal Cost: $%.2f', app.BestCost);
 
             % Tab 2 Updates
-            numNodes = numel(app.NodePressures);
-            PressureStatus = cell(numNodes, 1);
-            for k = 1:numNodes
-                if app.NodePressures(k) < Params.Pmin
-                    PressureStatus{k} = sprintf('Violation (<%.1fm)', Params.Pmin);
-                else
-                    PressureStatus{k} = 'Feasible (OK)';
-                end
-            end
-            app.UITableNodes.Data = table((1:numNodes)', app.NodePressures(:), PressureStatus, ...
-                'VariableNames', {'Node_ID', 'Pressure_m', 'Status'});
-
+            app.UITableNodes.Data = createNodeResultsTable( ...
+                app.NodePressures, ...
+                Params.Pmin);
             app.NodeStatusLabel.Text = sprintf('Min P: %.2fm | Max V: %.2fm/s', min(app.NodePressures), max(app.PipeVelocities));
 
             % Plots
+            numNodes = numel(app.NodePressures);
+            
             bar(app.PressureAxes, 1:numNodes, app.NodePressures, 0.6, 'FaceColor', [0 0.45 0.74]);
             yline(app.PressureAxes, Params.Pmin, '--r', sprintf('Pmin (%.1fm)', Params.Pmin), 'LineWidth', 1.5);
             grid(app.PressureAxes, 'on');
