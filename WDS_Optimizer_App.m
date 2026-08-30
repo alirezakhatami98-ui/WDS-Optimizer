@@ -282,7 +282,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             % Plots
             numNodes = numel(app.NodePressures);
-            
+
             bar(app.PressureAxes, 1:numNodes, app.NodePressures, 0.6, 'FaceColor', [0 0.45 0.74]);
             yline(app.PressureAxes, Params.Pmin, '--r', sprintf('Pmin (%.1fm)', Params.Pmin), 'LineWidth', 1.5);
             grid(app.PressureAxes, 'on');
@@ -294,16 +294,28 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
         % --- Export Excel ---
         function ExportToExcel(app, ~)
-            [file, path] = uiputfile('*.xlsx', 'Save Comprehensive Results as Excel');
+
+            [file, path] = uiputfile( ...
+                '*.xlsx', ...
+                'Save Comprehensive Results as Excel');
+
             if ischar(file)
+
                 fullFileName = fullfile(path, file);
-                writetable(app.UITablePipes.Data, fullFileName, 'Sheet', 'Pipe_Optimization');
-                writetable(app.UITableNodes.Data, fullFileName, 'Sheet', 'Hydraulic_Nodes');
-                if ~isempty(app.UITableBenchmark.Data)
-                    writetable(app.UITableBenchmark.Data, fullFileName, 'Sheet', 'Algorithm_Benchmark');
-                end
-                uialert(app.UIFigure, 'Results exported successfully!', 'Export Success');
+
+                exportResultsToExcel( ...
+                    app.UITablePipes.Data, ...
+                    app.UITableNodes.Data, ...
+                    app.UITableBenchmark.Data, ...
+                    fullFileName);
+
+                uialert( ...
+                    app.UIFigure, ...
+                    'Results exported successfully!', ...
+                    'Export Success');
+
             end
+
         end
 
         % --- Evaluation Helpers ---     
