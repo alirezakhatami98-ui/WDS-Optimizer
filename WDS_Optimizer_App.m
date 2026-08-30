@@ -240,13 +240,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             [Din, Cost, D] = loadOptimizationData( ...
                 app.DFileStr, app.CostFileStr);
 
-            try
-                tempInpPath = 'C:\temp_network.inp';
-                copyfile(app.InpFileStr, tempInpPath, 'f');
-            catch
-                tempInpPath = fullfile(pwd, 'temp_network.inp');
-                copyfile(app.InpFileStr, tempInpPath, 'f');
-            end
+            tempInpPath = createTempInpFile(app.InpFileStr);
 
             % 1. Update Headloss Formula directly inside the INP text file
             UpdateInpHeadlossFormula(tempInpPath, app.HeadlossDropDown.Value);
