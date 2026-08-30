@@ -1,0 +1,16 @@
+function pipeTable = createPipeResultsTable(NP, OptimalDiameters, PipeVelocities)
+
+    Pipe_ID = (1:NP)';
+
+    Diameter_mm = OptimalDiameters(:);
+
+    Velocity_m_s = PipeVelocities(:);
+
+    pipeTable = table( ...
+        Pipe_ID, ...
+        Diameter_mm, ...
+        Velocity_m_s, ...
+        'VariableNames', ...
+        {'Pipe_ID', 'Diameter_mm', 'Velocity_m_s'});
+
+end
