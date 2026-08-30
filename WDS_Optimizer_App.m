@@ -264,13 +264,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.BestCost = Score;
             app.OptimalDiameters = Position';
 
-            d.setLinkDiameter(1:NP, app.OptimalDiameters);
-            d.solveCompleteHydraulics();
-
-            P = d.getNodePressure();
-            junctions = strcmpi(d.getNodeType(), 'JUNCTION');
-            app.NodePressures = P(junctions);
-            app.PipeVelocities = abs(d.getLinkVelocity());
+            [app.NodePressures, app.PipeVelocities] = ...
+                calculateHydraulicResults(d, app.OptimalDiameters, NP);
 
             % Tab 1 Updates
             app.UITablePipes.Data = table((1:NP)', app.OptimalDiameters(:), app.PipeVelocities(:), ...
