@@ -1,0 +1,8 @@
+# MATLAB temporary and backup files
+*.asv
+*.m~
+*.autosave
+
+# EPANET temporary files
+temp_network*.inp
+temp_network*.txt
