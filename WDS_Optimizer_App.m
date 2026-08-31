@@ -35,7 +35,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         FixedPipesLabel       matlab.ui.control.Label
 
         RunButton             matlab.ui.control.Button
-        BenchmarkButton       matlab.ui.control.Button
         ExportButton          matlab.ui.control.Button
         StatusLabel           matlab.ui.control.Label
         
@@ -43,7 +42,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         TabGroup              matlab.ui.container.TabGroup
         CostTab               matlab.ui.container.Tab
         HydraulicsTab         matlab.ui.container.Tab
-        BenchmarkTab          matlab.ui.container.Tab
         
         % Tab 1 (Costs & Convergence)
         UIAxes                matlab.ui.control.UIAxes
@@ -55,10 +53,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         VelocityAxes          matlab.ui.control.UIAxes
         UITableNodes          matlab.ui.control.Table
         NodeStatusLabel       matlab.ui.control.Label
-
-        % Tab 3 (Benchmark Comparison)
-        BenchmarkAxes         matlab.ui.control.UIAxes
-        UITableBenchmark      matlab.ui.control.Table
         
         % Internal Data Storage
         InpFileStr
@@ -111,7 +105,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             app.StatusLabel.Text = 'Status: Running Optimization...';
             app.RunButton.Enable = 'off';
-            app.BenchmarkButton.Enable = 'off';
             drawnow;
 
             try
@@ -160,78 +153,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             end
 
             app.RunButton.Enable = 'on';
-            app.BenchmarkButton.Enable = 'on';
-        end
-
-        % --- Benchmark Routine (GA vs PSO) ---
-        function RunBenchmark(app, ~)
-            if isempty(app.InpFileStr) || isempty(app.DFileStr) || isempty(app.CostFileStr)
-                uialert(app.UIFigure, 'Please load all required input files first!', 'Input Error');
-                return;
-            end
-
-            app.StatusLabel.Text = 'Status: Running GA vs PSO Benchmark...';
-            app.RunButton.Enable = 'off';
-            app.BenchmarkButton.Enable = 'off';
-            drawnow;
-
-            try
-                [d, Din, Cost, D, NP, L, InitialD, Params, MaxGen] = app.PrepareEnvironment();
-
-                % Run GA
-                tGA_start = tic;
-                [ScoreGA, PositionGA, ConvGA] = runGA(d, D, NP, L, Din, Cost, Params, MaxGen);
-                tGA = toc(tGA_start);
-
-                % Get GA Hydraulics
-                d.setLinkDiameter(1:NP, PositionGA);
-                d.solveCompleteHydraulics();
-                P_GA = d.getNodePressure();
-                Pj_GA = P_GA(strcmpi(d.getNodeType(), 'JUNCTION'));
-                V_GA = abs(d.getLinkVelocity());
-
-                % Run PSO
-                tPSO_start = tic;
-                [ScorePSO, PositionPSO, ConvPSO] = runPSO(d, D, NP, L, Din, Cost, Params, MaxGen);
-                tPSO = toc(tPSO_start);
-
-                % Get PSO Hydraulics
-                d.setLinkDiameter(1:NP, PositionPSO);
-                d.solveCompleteHydraulics();
-                P_PSO = d.getNodePressure();
-                Pj_PSO = P_PSO(strcmpi(d.getNodeType(), 'JUNCTION'));
-                V_PSO = abs(d.getLinkVelocity());
-
-                d.unload();
-
-                % Plot Dual Convergence in Benchmark Tab
-                plot(app.BenchmarkAxes, 1:MaxGen, ConvGA, '-r', 'LineWidth', 2, 'DisplayName', 'GA');
-                hold(app.BenchmarkAxes, 'on');
-                plot(app.BenchmarkAxes, 1:MaxGen, ConvPSO, '-b', 'LineWidth', 2, 'DisplayName', 'PSO');
-                hold(app.BenchmarkAxes, 'off');
-                xlabel(app.BenchmarkAxes, 'Iteration / Generation');
-                ylabel(app.BenchmarkAxes, 'Best Cost ($)');
-                title(app.BenchmarkAxes, 'GA vs. PSO Convergence Speed');
-                legend(app.BenchmarkAxes, 'Location', 'northeast');
-                grid(app.BenchmarkAxes, 'on');
-
-                % Fill Benchmark Table
-                MetricNames = {'Best Cost ($)'; 'Execution Time (s)'; 'Min Pressure (m)'; 'Max Velocity (m/s)'};
-                GA_Results = [ScoreGA; tGA; min(Pj_GA); max(V_GA)];
-                PSO_Results = [ScorePSO; tPSO; min(Pj_PSO); max(V_PSO)];
-
-                app.UITableBenchmark.Data = table(MetricNames, GA_Results, PSO_Results, ...
-                    'VariableNames', {'Metric', 'Genetic_Algorithm', 'Particle_Swarm'});
-
-                app.TabGroup.SelectedTab = app.BenchmarkTab;
-                app.StatusLabel.Text = 'Status: Benchmark Complete!';
-            catch ME
-                app.StatusLabel.Text = 'Status: Benchmark Error!';
-                uialert(app.UIFigure, ME.message, 'Execution Error');
-            end
-
-            app.RunButton.Enable = 'on';
-            app.BenchmarkButton.Enable = 'on';
         end
 
         % --- Environment Setup Helper ---
@@ -306,7 +227,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 exportResultsToExcel( ...
                     app.UITablePipes.Data, ...
                     app.UITableNodes.Data, ...
-                    app.UITableBenchmark.Data, ...
                     fullFileName);
 
                 uialert( ...
@@ -316,15 +236,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             end
 
-        end
-
-        % --- Evaluation Helpers ---     
-        
-        function [cost, viol, feas] = evaluate_ind(~, ind, Problem)
-            
-            [cost, viol, feas] = evaluateSolution(ind, Problem);
-
-        end
+        end     
+                
     end
 
     % Component Initialization
@@ -333,7 +246,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.UIFigure = uifigure('Position', [100 100 1020 680], 'Name', 'WDS Optimization Toolkit v1.6.0');
 
             app.LeftPanel  = uipanel(app.UIFigure, 'Title', 'Input Controls & Constraints', 'Position', [10 10 310 660]);
-            app.RightPanel = uipanel(app.UIFigure, 'Title', 'Results & Benchmark Analysis', 'Position', [330 10 680 660]);
+            app.RightPanel = uipanel(app.UIFigure, 'Title', 'Results & Analysis', 'Position', [330 10 680 660]);
 
             % File Loading
             app.INPButton  = uibutton(app.LeftPanel, 'push', 'Text', 'Load .INP File', 'Position', [20 590 120 28], 'ButtonPushedFcn', @(btn, e) SelectINPFile(app, e));
@@ -372,7 +285,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             % Buttons
             app.RunButton       = uibutton(app.LeftPanel, 'push', 'Text', 'Run Single Optimization', 'Position', [20 150 270 38], 'BackgroundColor', [0.1 0.6 0.2], 'FontColor', 'w', 'FontSize', 12, 'FontWeight', 'bold', 'ButtonPushedFcn', @(btn, e) RunOptimization(app, e));
-            app.BenchmarkButton = uibutton(app.LeftPanel, 'push', 'Text', 'Run GA vs PSO Benchmark', 'Position', [20 105 270 38], 'BackgroundColor', [0.85 0.32 0.1], 'FontColor', 'w', 'FontSize', 12, 'FontWeight', 'bold', 'ButtonPushedFcn', @(btn, e) RunBenchmark(app, e));
             app.ExportButton    = uibutton(app.LeftPanel, 'push', 'Text', 'Export Excel (Multi-Sheet)', 'Position', [20 60 270 35], 'Enable', 'off', 'ButtonPushedFcn', @(btn, e) ExportToExcel(app, e));
 
             app.StatusLabel     = uilabel(app.LeftPanel, 'Text', 'Status: Ready', 'Position', [20 15 270 30], 'FontWeight', 'bold');
@@ -381,7 +293,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.TabGroup     = uitabgroup(app.RightPanel, 'Position', [10 10 660 620]);
             app.CostTab      = uitab(app.TabGroup, 'Title', 'Optimization & Costs');
             app.HydraulicsTab= uitab(app.TabGroup, 'Title', 'Hydraulic Results');
-            app.BenchmarkTab = uitab(app.TabGroup, 'Title', 'GA vs PSO Benchmark');
 
             % Tab 1
             app.UIAxes           = uiaxes(app.CostTab, 'Position', [10 240 630 330]);
@@ -394,9 +305,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.UITableNodes     = uitable(app.HydraulicsTab, 'Position', [400 50 245 530]);
             app.NodeStatusLabel  = uilabel(app.HydraulicsTab, 'Text', 'Min P: - | Max V: -', 'Position', [400 10 245 30], 'FontSize', 11, 'FontWeight', 'bold');
 
-            % Tab 3 (Benchmark)
-            app.BenchmarkAxes    = uiaxes(app.BenchmarkTab, 'Position', [10 220 630 350]);
-            app.UITableBenchmark = uitable(app.BenchmarkTab, 'Position', [10 20 630 180]);
         end
     end
 
