@@ -108,7 +108,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             drawnow;
 
             try
-                [d, Din, Cost, D, NP, L, InitialD, Params, MaxGen] = app.PrepareEnvironment();
+                [d, Din, Cost, D, NP, L, ~, Params, MaxGen] = app.PrepareEnvironment();
                 
                 SelectedAlg = app.AlgorithmDropDown.Value;
 
