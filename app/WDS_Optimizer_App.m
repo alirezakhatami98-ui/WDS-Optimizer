@@ -243,7 +243,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
     % Component Initialization
     methods (Access = private)
         function createComponents(app)
-            app.UIFigure = uifigure('Position', [100 100 1020 680], 'Name', 'WDS Optimization Toolkit v1.6.0');
+            app.UIFigure = uifigure('Position', [100 100 1020 680], 'Name', 'WDS Optimization Toolkit v1.7.0');
 
             app.LeftPanel  = uipanel(app.UIFigure, 'Title', 'Input Controls & Constraints', 'Position', [10 10 310 660]);
             app.RightPanel = uipanel(app.UIFigure, 'Title', 'Results & Analysis', 'Position', [330 10 680 660]);
