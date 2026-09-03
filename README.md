@@ -2,7 +2,7 @@
 
 **MATLAB-based Water Distribution System Optimization Toolkit**
 
-A MATLAB application for optimizing the design of Water Distribution Systems (WDS) using hydraulic simulation through EPANET and population-based metaheuristic optimization algorithms.
+A MATLAB application for optimizing Water Distribution Systems (WDS) using EPANET hydraulic simulation and population-based optimization algorithms.
 
 **Current Version: 1.7.0**
 
@@ -10,72 +10,88 @@ A MATLAB application for optimizing the design of Water Distribution Systems (WD
 
 ## Overview
 
-The **WDS Optimization Toolkit** is a MATLAB-based software application developed for the optimal design of water distribution networks.
+The **WDS Optimization Toolkit** is a MATLAB-based engineering application for the optimal design of water distribution networks.
 
 The toolkit combines:
 
-- **EPANET hydraulic simulation**
-- **Genetic Algorithm (GA)**
-- **Particle Swarm Optimization (PSO)**
-- Multiple pipe headloss formulations
-- Pressure and velocity constraints
-- Fixed-pipe support
-- Graphical User Interface (GUI)
-- Hydraulic result visualization
-- Excel result export
+* EPANET hydraulic simulation
+* Genetic Algorithm (GA)
+* Particle Swarm Optimization (PSO)
+* Discrete pipe-diameter optimization
+* Multiple hydraulic headloss formulations
+* Minimum pressure constraints
+* Maximum velocity constraints
+* Fixed-pipe support
+* Graphical User Interface (GUI)
+* Hydraulic result visualization
+* Excel result export
 
-The application allows users to load an EPANET network model together with available pipe diameter and cost data, define hydraulic and optimization parameters, select an optimization algorithm, and obtain an optimized pipe-diameter configuration subject to hydraulic constraints.
-
----
-
-## Key Features
-
-### 1. EPANET-Based Hydraulic Simulation
-
-The toolkit uses the EPANET MATLAB interface to perform hydraulic simulations of the water distribution network.
-
-For each candidate solution, the selected pipe diameters are assigned to the network and the hydraulic system is solved before evaluating the solution.
-
-This allows the optimization algorithms to directly evaluate candidate network designs according to their hydraulic performance.
+The application allows users to load an EPANET network together with available pipe diameter and cost data, configure hydraulic and optimization parameters, select an optimization algorithm, and evaluate optimized pipe-diameter configurations subject to hydraulic constraints.
 
 ---
 
-### 2. Optimization Algorithms
+# Current Capabilities
 
-The application currently supports two population-based optimization algorithms.
+## EPANET Hydraulic Simulation
 
-#### Genetic Algorithm (GA)
+The toolkit uses the **EPANET-MATLAB Toolkit** to perform hydraulic simulations of candidate network designs.
 
-The implemented GA includes:
+The EPANET-MATLAB Toolkit used by this project is included in the repository as a project dependency.
 
-- Random population initialization
-- Roulette-wheel selection
-- Single-point crossover
-- Mutation
-- Elitist preservation of the best solution
-- Constraint-aware solution evaluation
-- Convergence tracking
+Current dependency version:
 
-#### Particle Swarm Optimization (PSO)
+**EPANET-MATLAB Toolkit 2.3.5.2**
 
-The implemented PSO includes:
+The application therefore does not depend on a user-specific installation path such as:
 
-- Discrete pipe-diameter decision variables
-- Particle position and velocity updates
-- Personal-best tracking
-- Global-best tracking
-- Constraint-aware solution evaluation
-- Convergence tracking
+```text
+C:\Users\<username>\Desktop\...
+```
 
-Both algorithms operate on the same hydraulic optimization problem and use the same evaluation framework.
+The dependency is stored under:
+
+```text
+dependencies/EPANET-Matlab-Toolkit-2.3.5.2/
+```
 
 ---
 
-## Hydraulic Headloss Formulations
+# Optimization Algorithms
 
-The application allows the user to select the hydraulic headloss formulation directly from the graphical interface.
+The application currently supports two optimization algorithms.
 
-Three formulations are supported:
+## Genetic Algorithm (GA)
+
+The implemented GA currently includes:
+
+* Random population initialization
+* Roulette-wheel selection
+* Single-point crossover
+* Mutation
+* Elitist preservation of the best solution
+* Constraint-aware solution evaluation
+* Convergence tracking
+
+## Particle Swarm Optimization (PSO)
+
+The implemented PSO currently includes:
+
+* Discrete pipe-diameter decision variables
+* Particle position and velocity updates
+* Personal-best tracking
+* Global-best tracking
+* Constraint-aware solution evaluation
+* Convergence tracking
+
+Both algorithms operate on the same hydraulic optimization framework and evaluate candidate solutions through EPANET hydraulic simulation.
+
+---
+
+# Hydraulic Headloss Formulations
+
+The application allows the user to select the hydraulic headloss formulation.
+
+The currently supported formulations are:
 
 ### Hazen-Williams
 
@@ -89,150 +105,133 @@ Three formulations are supported:
 
 **EPANET code:** `C-M`
 
-The selected formulation is written to a temporary copy of the input EPANET `.inp` file before the network is loaded and simulated.
+The selected formulation is applied to a temporary copy of the user-provided EPANET input file.
 
-The original input file is not modified.
+The original network input file is not modified.
 
 ---
 
-## Optimization Problem
+# Optimization Problem
 
-The optimization problem is formulated as a discrete pipe-diameter optimization problem.
+The optimization problem is formulated as a **discrete pipe-diameter optimization problem**.
 
 For each variable pipe, the optimizer selects one diameter from the available diameter set.
 
-### Decision Variables
+## Decision Variables
 
-The decision variables represent the selected commercial diameter for each variable pipe.
+Each optimization variable represents a selected diameter option for a variable pipe.
 
-If a pipe is marked as fixed, its original diameter is retained and is not modified by the optimization algorithm.
-
----
-
-## Objective Function
-
-The objective is to minimize the total cost of the variable pipes.
-
-The cost is calculated from:
-
-- Pipe length
-- Selected pipe diameter
-- Corresponding unit cost
-
-The optimization uses the available diameter and cost data supplied by the user.
-
-The total cost is evaluated only for variable pipes. Fixed pipes retain their existing diameter and are excluded from the optimization cost calculation.
+Fixed pipes are excluded from the optimization variables and retain their initial network diameters.
 
 ---
 
-## Hydraulic Constraints
+# Objective Function
 
-Two hydraulic constraints are currently supported.
+The objective is to minimize the total cost associated with the variable pipes.
 
-### Minimum Pressure
+The cost calculation uses:
+
+* Pipe length
+* Selected pipe diameter
+* Corresponding cost data
+
+The diameter and cost data supplied by the user determine the available design alternatives.
+
+Fixed pipes are excluded from the optimization cost calculation.
+
+---
+
+# Hydraulic Constraints
+
+The current implementation supports two hydraulic constraints.
+
+## Minimum Pressure
 
 The user specifies:
 
-`Pmin`
+```text
+Pmin
+```
 
-The pressure at each junction must satisfy:
+Junction pressure must satisfy:
 
-`Pj >= Pmin`
+```text
+Pj >= Pmin
+```
 
-where `Pj` represents junction pressure.
+where `Pj` is the pressure at a junction.
 
-### Maximum Velocity
+## Maximum Velocity
 
 The user specifies:
 
-`Vmax`
+```text
+Vmax
+```
 
-The velocity in each pipe must satisfy:
+Pipe velocity must satisfy:
 
-`V <= Vmax`
+```text
+V <= Vmax
+```
 
-The constraint evaluation calculates the total violation of the pressure and velocity constraints.
+Constraint violation is calculated from pressure deficiencies and velocity excesses.
 
 A solution is considered feasible when the total constraint violation is zero.
 
 ---
 
-## Constraint Handling
-
-Constraint violations are explicitly incorporated into the optimization process.
-
-The total violation is calculated as:
-
-- Pressure deficiency below `Pmin`
-- Velocity excess above `Vmax`
-
-The GA uses a penalty-based fitness function to discourage infeasible solutions.
-
-The PSO uses feasibility and constraint violation when updating personal-best and global-best solutions.
-
-This allows the optimization algorithms to distinguish between feasible and infeasible network designs.
-
----
-
-## Fixed Pipes
+# Fixed Pipes
 
 The application supports fixed pipe IDs.
 
-The user can enter pipe IDs in the GUI, for example:
+For example:
 
 ```text
 1, 3, 7
 ```
 
-These pipes are excluded from the optimization variables.
+Fixed pipes are excluded from the optimization variables.
 
-Their initial EPANET diameters are retained throughout the optimization.
+Their original EPANET diameters are retained during optimization.
 
-All remaining pipes are treated as variable pipes.
-
-This feature allows existing infrastructure or otherwise predetermined pipes to remain unchanged while the remaining network is optimized.
+This allows existing infrastructure or predetermined pipes to remain unchanged while the remaining network is optimized.
 
 ---
 
 # Input Files
 
-The application requires three user-selected input files:
+The application uses three main user-provided input files:
 
 1. EPANET `.inp` network file
-2. Diameter data file (`D.txt`)
-3. Cost data file (`Cost.txt`)
+2. Diameter data file
+3. Cost data file
 
 ---
 
-## 1. EPANET Input File
+## EPANET Network File
 
-The `.inp` file contains the EPANET water distribution network model.
+The `.inp` file contains the EPANET network model.
 
-It should contain the network information required for hydraulic simulation, including components such as:
+It should contain the information required for hydraulic simulation, including elements such as:
 
-- Junctions
-- Reservoirs
-- Tanks
-- Pipes
-- Demands
-- Elevations
-- Hydraulic properties
+* Junctions
+* Reservoirs
+* Tanks
+* Pipes
+* Demands
+* Elevations
+* Hydraulic properties
 
-The application creates a temporary copy of the selected `.inp` file when modifying the headloss formulation.
-
-The original network file remains unchanged.
+The application uses a temporary copy when modifying the headloss formulation.
 
 ---
 
-## 2. Diameter File
+## Diameter File
 
-The diameter file contains the available pipe diameters.
+The diameter file contains the available pipe diameter options.
 
-The current implementation loads the values using MATLAB's `load` function.
-
-The values are interpreted as diameter data in the unit expected by the optimization data structure and are converted to millimeters internally.
-
-For example:
+Example:
 
 ```text
 4
@@ -242,15 +241,15 @@ For example:
 12
 ```
 
+The values are interpreted according to the current optimization data structure and converted internally as required by the application.
+
 ---
 
-## 3. Cost File
+## Cost File
 
-The cost file contains the corresponding cost values for the available diameters.
+The cost file contains the corresponding cost values for the available diameter options.
 
-The diameter and cost files must contain corresponding entries.
-
-For example:
+Example:
 
 ```text
 120
@@ -260,7 +259,9 @@ For example:
 480
 ```
 
-The first cost corresponds to the first available diameter, the second cost to the second diameter, and so on.
+The diameter and cost data must contain corresponding entries.
+
+For example, the first cost corresponds to the first diameter, the second cost to the second diameter, and so on.
 
 ---
 
@@ -268,310 +269,284 @@ The first cost corresponds to the first available diameter, the second cost to t
 
 The application provides a graphical interface for configuring and executing an optimization run.
 
-The interface is divided into two main areas:
+The interface contains controls for:
 
-- **Input Controls & Constraints**
-- **Results & Analysis**
+* Network input
+* Diameter data
+* Cost data
+* Hydraulic headloss formulation
+* Optimization algorithm
+* Population / swarm size
+* Maximum generations / iterations
+* Minimum pressure
+* Maximum velocity
+* Fixed pipe IDs
 
----
-
-## Input Controls
-
-The left panel provides the following controls.
-
-### Network Files
-
-- Load `.INP File`
-- Load `D.txt`
-- Load `Cost.txt`
-
-### Hydraulic Settings
-
-The user can select:
-
-- Hazen-Williams (HW)
-- Darcy-Weisbach (DW)
-- Manning (CM)
-
-### Optimization Algorithm
-
-The user can select:
-
-- Genetic Algorithm (GA)
-- Particle Swarm (PSO)
-
-### Population / Swarm Size
-
-The `Population / Swarm` field determines the number of individuals used by GA or particles used by PSO.
-
-### Maximum Generations / Iterations
-
-The `Max Gen / Iter` field determines the number of optimization iterations.
-
-### Minimum Pressure
-
-The minimum allowable junction pressure can be specified in meters.
-
-### Maximum Velocity
-
-The maximum allowable pipe velocity can be specified in meters per second.
-
-### Fixed Pipe IDs
-
-Pipe IDs that must remain unchanged can be entered in the corresponding field.
+The results area provides optimization and hydraulic analysis information.
 
 ---
 
 # Results & Analysis
 
-The right side of the application contains two result tabs.
-
----
-
 ## Optimization & Costs
 
-This tab displays:
+The optimization results include:
 
 ### Convergence Plot
 
-The optimization convergence curve shows the progression of the best objective value during the optimization process.
+The convergence curve shows the progression of the best objective value during optimization.
 
 For GA, the horizontal axis represents generations.
 
 For PSO, the horizontal axis represents iterations.
 
-### Pipe Results Table
+### Pipe Results
 
-The pipe results table contains:
+The pipe results include:
 
-- Pipe ID
-- Optimized Diameter (mm)
-- Pipe Velocity (m/s)
+* Pipe ID
+* Optimized diameter
+* Pipe velocity
 
 ### Optimal Cost
 
-The final objective value is displayed as the optimal network cost.
+The final objective value is displayed as the optimized network cost.
 
 ---
 
 ## Hydraulic Results
 
-The Hydraulic Results tab provides hydraulic performance information.
+The hydraulic results include:
 
 ### Pressure Profile
 
-A bar chart displays the calculated junction pressures.
-
-The minimum pressure constraint is displayed on the plot for comparison.
+A pressure profile displays the calculated junction pressures together with the minimum pressure constraint.
 
 ### Velocity Profile
 
-A bar chart displays the calculated pipe velocities.
+A velocity profile displays calculated pipe velocities together with the maximum velocity constraint.
 
-The maximum velocity constraint is displayed on the plot for comparison.
+### Node Results
 
-### Node Results Table
+The node results include:
 
-The node table contains:
+* Node ID
+* Pressure
+* Constraint status
 
-- Node ID
-- Pressure (m)
-- Constraint status
-
-Each node is identified as either:
-
-- `Feasible (OK)`
-- `Violation (<Pmin)`
+Nodes can be identified according to their hydraulic constraint status.
 
 ### Hydraulic Summary
 
-The interface reports:
+The application reports hydraulic summary information such as:
 
-- Minimum junction pressure
-- Maximum pipe velocity
-
-These values provide a quick assessment of the hydraulic feasibility of the optimized solution.
+* Minimum junction pressure
+* Maximum pipe velocity
 
 ---
 
 # Excel Export
 
-The application provides an Excel export function for the final optimization results.
+The application supports Excel export of optimization and hydraulic results.
 
-The exported workbook contains two sheets.
+The exported workbook contains result tables for pipes and nodes.
 
-### `Pipe_Optimization`
+Typical worksheets include:
 
-Contains:
+```text
+Pipe_Optimization
+Hydraulic_Nodes
+```
 
-- Pipe ID
-- Optimized diameter
-- Pipe velocity
-
-### `Hydraulic_Nodes`
-
-Contains:
-
-- Node ID
-- Pressure
-- Hydraulic constraint status
-
-The export is performed using MATLAB's `writetable` functionality.
+The export is implemented using MATLAB table functionality and `writetable`.
 
 ---
 
 # Project Structure
 
-The repository is organized around a main MATLAB application and a set of modular functions.
+The repository is organized into logical modules.
 
 ```text
 WDS-Optimizer/
 │
-├── 64bit/
-│   └── EPANET / supporting 64-bit components
+├── app/
+│   └── WDS_Optimizer_App.m
 │
-├── Nets/
-│   └── Network-related files
+├── algorithms/
+│   ├── runGA.m
+│   ├── runPSO.m
+│   └── selectionRoulette.m
 │
-├── WDS_Optimizer_App.m
+├── optimization/
+│   ├── calculateCost.m
+│   ├── calculateFitness.m
+│   ├── checkConstraints.m
+│   ├── evaluatePopulation.m
+│   └── evaluateSolution.m
 │
-├── runGA.m
-├── runPSO.m
+├── hydraulics/
+│   ├── calculateHydraulicResults.m
+│   ├── createTempInpFile.m
+│   ├── initializeNetwork.m
+│   ├── runHydraulicSimulation.m
+│   └── UpdateInpHeadlossFormula.m
 │
-├── evaluatePopulation.m
-├── evaluateSolution.m
+├── data/
+│   ├── buildOptimizationParams.m
+│   └── loadOptimizationData.m
 │
-├── calculateFitness.m
-├── calculateCost.m
-├── checkConstraints.m
-├── selectionRoulette.m
+├── utils/
+│   ├── createNodeResultsTable.m
+│   ├── createPipeResultsTable.m
+│   └── exportResultsToExcel.m
 │
-├── runHydraulicSimulation.m
-├── calculateHydraulicResults.m
+├── dependencies/
+│   └── EPANET-Matlab-Toolkit-2.3.5.2/
 │
-├── loadOptimizationData.m
-├── initializeNetwork.m
-├── buildOptimizationParams.m
-├── createTempInpFile.m
-├── UpdateInpHeadlossFormula.m
+├── networks/
+│   └── Project network files
 │
-├── createPipeResultsTable.m
-├── createNodeResultsTable.m
-├── exportResultsToExcel.m
-│
+├── runWDSOptimizer.m
+├── setupWDSOptimizer.m
 ├── .gitignore
 └── README.md
 ```
 
+The `utils` directory contains general-purpose result and export utilities.
+
+The previous `results` directory was reorganized into `utils` during the repository architecture refactoring.
+
 ---
 
-# Software Requirements
+# EPANET-MATLAB Toolkit Dependency
 
-The application requires:
+The project includes the required EPANET-MATLAB Toolkit under:
 
-- MATLAB
-- EPANET MATLAB interface / EPANET C-API
-- A compatible 64-bit Windows environment
+```text
+dependencies/EPANET-Matlab-Toolkit-2.3.5.2/
+```
 
-The MATLAB environment must be able to locate and execute the EPANET interface used by the application.
+The original Toolkit structure is retained inside the dependency directory.
+
+The project does not use the old root-level:
+
+```text
+64bit/
+```
+
+directory.
+
+The bundled Toolkit contains the platform-specific components required by the original Toolkit distribution.
+
+The project currently targets the MATLAB/Windows environment in which the application has been tested.
 
 ---
 
 # Installation
 
-### 1. Clone or Download the Repository
+## 1. Obtain the Repository
 
-Obtain the repository from GitHub:
+Clone or download the repository:
 
 **WDS Optimization Toolkit**
 
 https://github.com/alirezakhatami98-ui/WDS-Optimizer
 
-### 2. Open MATLAB
+## 2. Open MATLAB
 
-Launch MATLAB and navigate to the repository directory.
+Launch MATLAB and open the project directory.
 
-### 3. Verify EPANET Availability
+The repository should be used as the working project directory.
 
-Make sure the EPANET MATLAB interface and required 64-bit components are available to MATLAB.
+## 3. Configure the Project
 
-### 4. Prepare Input Files
-
-Prepare:
-
-```text
-Network.inp
-D.txt
-Cost.txt
-```
-
----
-
-# Running the Application
-
-After MATLAB is configured and the repository directory is active, run:
+Run the project setup procedure:
 
 ```matlab
-WDS_Optimizer_App
+setupWDSOptimizer
 ```
 
-The application window will open.
+The setup procedure is responsible for preparing the MATLAB environment for the project and its bundled dependencies.
+
+The project uses repository-relative paths rather than hard-coded paths belonging to a particular user's computer.
+
+## 4. Run the Application
+
+Use:
+
+```matlab
+runWDSOptimizer
+```
+
+as the project entry point.
+
+The application can then be configured through the graphical interface.
 
 ---
 
-## Recommended Workflow
+# Recommended Workflow
 
-### Step 1 — Load the Network
+### Step 1 — Start the Project
 
-Click:
+Launch MATLAB and open the WDS Optimizer repository.
+
+Run the project launcher:
+
+```matlab
+runWDSOptimizer
+```
+
+### Step 2 — Load the Network
+
+Use:
 
 **Load .INP File**
 
 and select the EPANET network file.
 
-### Step 2 — Load Diameter Data
+### Step 3 — Load Diameter Data
 
-Click:
+Use:
 
 **Load D.txt**
 
-and select the available diameter data file.
+and select the available diameter data.
 
-### Step 3 — Load Cost Data
+### Step 4 — Load Cost Data
 
-Click:
+Use:
 
 **Load Cost.txt**
 
-and select the corresponding cost data file.
+and select the corresponding cost data.
 
-### Step 4 — Select Headloss Formula
+### Step 5 — Select Headloss Formula
 
 Choose one of:
 
-- Hazen-Williams
-- Darcy-Weisbach
-- Manning
+* Hazen-Williams
+* Darcy-Weisbach
+* Manning
 
-### Step 5 — Select Optimization Algorithm
+### Step 6 — Select Optimization Algorithm
 
 Choose:
 
-- Genetic Algorithm
-- Particle Swarm
+* Genetic Algorithm
+* Particle Swarm
 
-### Step 6 — Configure Optimization Parameters
+### Step 7 — Configure Parameters
 
 Specify:
 
-- Population / swarm size
-- Maximum generations / iterations
-- Minimum pressure
-- Maximum velocity
+* Population / swarm size
+* Maximum generations / iterations
+* Minimum pressure
+* Maximum velocity
 
-### Step 7 — Define Fixed Pipes
+### Step 8 — Define Fixed Pipes
 
-If required, enter the pipe IDs that must remain unchanged.
+If required, enter pipe IDs that must remain unchanged.
 
 For example:
 
@@ -579,161 +554,253 @@ For example:
 1, 3, 5
 ```
 
-### Step 8 — Run Optimization
+### Step 9 — Run Optimization
 
 Click:
 
 **Run Single Optimization**
 
-The application will perform the optimization and update the results.
+The selected optimization algorithm will evaluate candidate designs using EPANET hydraulic simulation.
 
-### Step 9 — Analyze Results
+### Step 10 — Analyze Results
 
 Review:
 
-- Convergence curve
-- Optimal cost
-- Pipe diameters
-- Pipe velocities
-- Junction pressures
-- Constraint status
+* Convergence curve
+* Optimal cost
+* Pipe diameters
+* Pipe velocities
+* Junction pressures
+* Constraint status
 
-### Step 10 — Export Results
+### Step 11 — Export Results
 
-Click:
+Use:
 
 **Export Excel (Multi-Sheet)**
 
-to save the optimization results as an Excel workbook.
+to export the calculated results.
 
 ---
 
-# Optimization Workflow
+# Temporary Files
 
-The overall computational workflow can be summarized as follows:
+The application currently creates temporary EPANET files during execution.
+
+Typical temporary files include:
 
 ```text
-User Input
-    │
-    ├── EPANET Network
-    ├── Diameter Data
-    ├── Cost Data
-    ├── Hydraulic Constraints
-    └── Algorithm Parameters
-            │
-            ▼
-    Load Optimization Data
-            │
-            ▼
-    Create Temporary INP File
-            │
-            ▼
-    Set Headloss Formulation
-            │
-            ▼
-    Initialize EPANET Network
-            │
-            ▼
-    Build Optimization Parameters
-            │
-            ▼
-    Initialize GA / PSO
-            │
-            ▼
-    Generate Candidate Solutions
-            │
-            ▼
-    Assign Pipe Diameters
-            │
-            ▼
-    Run EPANET Hydraulic Simulation
-            │
-            ▼
-    Calculate Cost
-            │
-            ▼
-    Check Pressure & Velocity Constraints
-            │
-            ▼
-    Update Optimization Algorithm
-            │
-            ▼
-    Repeat Until Maximum Iterations
-            │
-            ▼
-    Final Optimized Solution
-            │
-            ▼
-    Hydraulic Analysis & Visualization
-            │
-            ▼
-    Excel Export
+temp_network*.inp
+temp_network*.txt
 ```
 
----
+These files are runtime artifacts and are not intended to be committed to the repository.
 
-# Important Implementation Details
+They are excluded through `.gitignore`.
 
-### Discrete Diameter Selection
-
-The optimization does not treat pipe diameter as a continuous variable.
-
-Each decision variable corresponds to an index in the available diameter set.
-
-This ensures that optimized designs use the provided diameter options.
-
-### Fixed Infrastructure
-
-Fixed pipes are excluded from the optimization variables and retain their initial network diameters.
-
-### Hydraulic Evaluation
-
-Every candidate solution is evaluated through a hydraulic simulation before its objective value and constraint status are determined.
-
-### Junction Pressure
-
-Pressure constraints are evaluated on EPANET junction nodes.
-
-### Pipe Velocity
-
-Velocity constraints are evaluated for the network pipes.
+Professional temporary-file lifecycle management is planned for a later development phase.
 
 ---
 
-# Error Handling
+# Development Architecture
 
-The application provides user-facing alerts for important runtime conditions, including:
+The repository is being developed incrementally.
 
-- Missing input files
-- Invalid file selection
-- File paths containing spaces
-- Runtime execution errors
-
-The application also displays its current state through the status label, including:
+The architecture is intentionally divided into functional layers:
 
 ```text
-Status: Ready
-Status: Running Optimization...
-Status: Completed Successfully!
-Status: Error occurred!
+GUI
+ │
+ ▼
+Algorithms
+ │
+ ▼
+Optimization
+ │
+ ▼
+Hydraulics
+ │
+ ▼
+EPANET
 ```
 
+Supporting data and utility modules are separated from the computational layers.
+
+This structure is intended to improve:
+
+* Maintainability
+* Readability
+* Testability
+* Extensibility
+* Separation of concerns
+
 ---
 
-# License
+# Development Roadmap
 
-This project is released under the **MIT License**.
+The project is being improved through a staged development process.
+
+## Phase 1 — Repository Architecture
+
+**Status: Completed**
+
+Completed activities include:
+
+* Repository organization
+* Modular directory structure
+* Relocation of MATLAB source files
+* Reorganization of result utilities
+* Integration of EPANET-MATLAB Toolkit as a project dependency
+* Removal of the previous root-level `64bit` directory
+* Repository-relative setup/launcher structure
+* Dependency path verification
+* Functional regression testing
 
 ---
 
-# Author
+## Phase 2 — Input Validation & Configuration
 
-**Seyed Alireza Khatami**
+**Status: Next**
 
-GitHub:
+Planned work includes systematic validation of:
 
-https://github.com/alirezakhatami98-ui
+* Optimization parameters
+* Hydraulic constraints
+* Diameter data
+* Cost data
+* Network data
+* Fixed pipe IDs
+* Network/data consistency
 
-Repository:
+---
 
-https://github.com/alirezakhatami98-ui/WDS-Optimizer
+## Phase 3 — Temporary Files & EPANET Lifecycle
+
+Planned improvements include:
+
+* Unique temporary files
+* Appropriate temporary directories
+* Automatic cleanup
+* Error-safe cleanup
+* Robust EPANET object lifecycle
+* Proper unloading during exceptions
+
+---
+
+## Phase 4 — Unified Optimization Problem
+
+A unified optimization problem definition will be developed for GA and PSO.
+
+---
+
+## Phase 5 — Constraint Handling
+
+Constraint evaluation, feasibility and penalty handling will be reviewed and unified.
+
+---
+
+## Phase 6 — Genetic Algorithm Improvement
+
+The GA implementation will be reviewed for:
+
+* Elitism
+* Selection
+* Crossover
+* Mutation
+* Infeasible-solution handling
+* Stopping criteria
+* Best feasible solution
+* Convergence tracking
+
+---
+
+## Phase 7 — Discrete PSO Improvement
+
+The suitability of the current PSO implementation for discrete pipe-diameter optimization will be scientifically evaluated.
+
+---
+
+## Phase 8 — Performance Optimization
+
+Potential improvements include:
+
+* Hydraulic evaluation overhead
+* Repeated simulations
+* Caching
+* EPANET object management
+* Evaluation performance
+* Possible parallel evaluation
+
+Parallel execution will only be considered after compatibility with EPANET and MATLAB has been evaluated.
+
+---
+
+## Phase 9 — Reproducibility
+
+Random seed control will be introduced to support reproducible optimization experiments.
+
+---
+
+## Phase 10 — Benchmark / Experiment Framework
+
+A formal experimental framework will be developed for comparing algorithms using:
+
+* Multiple independent runs
+* Best cost
+* Mean cost
+* Standard deviation
+* Execution time
+* Feasibility rate
+* Convergence comparison
+
+---
+
+## Phase 11 — GUI Enhancement
+
+Planned GUI improvements include:
+
+* Improved validation messages
+* Progress indication
+* Optimization cancellation
+* Feasibility display
+* Advanced settings
+* Improved result presentation
+* Improved error management
+
+---
+
+## Phase 12 — Professional Reporting
+
+The reporting system will be expanded to provide structured optimization and hydraulic reports.
+
+---
+
+## Phase 13 — Testing
+
+The project will progressively include:
+
+* Unit tests
+* Integration tests
+* Hydraulic validation
+* Optimization validation
+* Reproducible benchmark networks
+
+---
+
+## Phase 14 — Final Documentation & Release
+
+Final documentation and release preparation will be performed after the architecture and capabilities have stabilized.
+
+---
+
+# Current Development Status
+
+**Version:** `1.7.0`
+
+**Phase 1:** Completed
+
+**Current next phase:** Phase 2 — Input Validation & Configuration
+
+The existing optimization functionality has been tested after the Phase 1 repository refactoring.
+
+Future phases will be implemented incrementally, with functional testing performed after each phase.
