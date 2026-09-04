@@ -71,10 +71,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             [file, path] = uigetfile('*.inp', 'Select EPANET .inp File');
             if ischar(file)
                 fullPath = strrep(fullfile(path, file), '\', '/');
-                if contains(fullPath, ' ')
-                    uialert(app.UIFigure, 'Path contains spaces. Move file to a folder without spaces.', 'File Path Error');
-                    return;
-                end
                 app.InpFileStr = fullPath;
                 app.INPLabel.Text = file;
             end
