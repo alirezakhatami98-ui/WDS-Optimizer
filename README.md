@@ -25,6 +25,7 @@ The toolkit combines:
 * Graphical User Interface (GUI)
 * Hydraulic result visualization
 * Excel result export
+* Structured input and configuration validation
 
 The application allows users to load an EPANET network together with available pipe diameter and cost data, configure hydraulic and optimization parameters, select an optimization algorithm, and evaluate optimized pipe-diameter configurations subject to hydraulic constraints.
 
@@ -71,6 +72,7 @@ The implemented GA currently includes:
 * Elitist preservation of the best solution
 * Constraint-aware solution evaluation
 * Convergence tracking
+* Fixed-pipe support
 
 ## Particle Swarm Optimization (PSO)
 
@@ -82,6 +84,7 @@ The implemented PSO currently includes:
 * Global-best tracking
 * Constraint-aware solution evaluation
 * Convergence tracking
+* Fixed-pipe support
 
 Both algorithms operate on the same hydraulic optimization framework and evaluate candidate solutions through EPANET hydraulic simulation.
 
@@ -117,11 +120,26 @@ The optimization problem is formulated as a **discrete pipe-diameter optimizatio
 
 For each variable pipe, the optimizer selects one diameter from the available diameter set.
 
-## Decision Variables
+Fixed pipes are excluded from the optimization variables and retain their initial network diameters.
+
+---
+
+# Decision Variables
 
 Each optimization variable represents a selected diameter option for a variable pipe.
 
-Fixed pipes are excluded from the optimization variables and retain their initial network diameters.
+If fixed pipes are specified, they are excluded from the optimization search space.
+
+The remaining pipes are treated as variable pipes.
+
+The optimization framework explicitly maintains:
+
+```text
+Fixed Pipes
+Variable Pipes
+```
+
+and validates that these two sets do not overlap and together cover all pipe indices.
 
 ---
 
@@ -195,73 +213,144 @@ Fixed pipes are excluded from the optimization variables.
 
 Their original EPANET diameters are retained during optimization.
 
-This allows existing infrastructure or predetermined pipes to remain unchanged while the remaining network is optimized.
+The fixed-pipe input is validated before optimization.
+
+The validation checks:
+
+* Empty input
+* Comma-separated format
+* Integer pipe IDs
+* Positive pipe IDs
+* Pipe ID range
+* Duplicate pipe IDs
+
+The resulting fixed-pipe list is standardized and sorted.
 
 ---
 
-# Input Files
+# Input Validation & Configuration
 
-The application uses three main user-provided input files:
+Input validation was implemented and integrated into the main optimization workflow during **Phase 2**.
 
-1. EPANET `.inp` network file
-2. Diameter data file
-3. Cost data file
+The validation layer is responsible for detecting invalid user input and inconsistent optimization/network data before the optimization algorithms are executed.
 
----
+## Optimization Parameter Validation
 
-## EPANET Network File
-
-The `.inp` file contains the EPANET network model.
-
-It should contain the information required for hydraulic simulation, including elements such as:
-
-* Junctions
-* Reservoirs
-* Tanks
-* Pipes
-* Demands
-* Elevations
-* Hydraulic properties
-
-The application uses a temporary copy when modifying the headloss formulation.
-
----
-
-## Diameter File
-
-The diameter file contains the available pipe diameter options.
-
-Example:
+The function:
 
 ```text
-4
-6
-8
-10
-12
+validateOptimizationParameters.m
 ```
 
-The values are interpreted according to the current optimization data structure and converted internally as required by the application.
+validates:
+
+* Population/swarm size (`NS`)
+* Maximum generations/iterations (`MaxGen`)
+* Minimum pressure (`Pmin`)
+* Maximum velocity (`Vmax`)
+
+The validation checks appropriate numeric, scalar, finite, integer, and positive-value requirements.
+
+Invalid parameters generate descriptive MATLAB errors that are handled by the GUI execution layer.
 
 ---
 
-## Cost File
+## Diameter and Cost Data Validation
 
-The cost file contains the corresponding cost values for the available diameter options.
-
-Example:
+The function:
 
 ```text
-120
-180
-260
-350
-480
+validateOptimizationData.m
 ```
 
-The diameter and cost data must contain corresponding entries.
+validates the available diameter and cost data.
 
-For example, the first cost corresponds to the first diameter, the second cost to the second diameter, and so on.
+The validation includes:
+
+* Empty data detection
+* Numeric data type
+* Finite values
+* Positive diameter values
+* Unique diameter values
+* Positive cost values
+* Matching number of diameter and cost entries
+
+Diameter and cost arrays must therefore represent a valid one-to-one mapping of available design alternatives.
+
+---
+
+## Fixed Pipe Validation
+
+The function:
+
+```text
+validateFixedPipes.m
+```
+
+validates fixed-pipe input entered through the GUI.
+
+It checks:
+
+* Empty input
+* Input format
+* Integer pipe IDs
+* Valid pipe ID range
+* Duplicate IDs
+
+The validated pipe IDs are sorted before being passed to the optimization configuration.
+
+---
+
+## Network Consistency Validation
+
+The function:
+
+```text
+validateNetworkConsistency.m
+```
+
+performs consistency checks between the EPANET network and optimization data.
+
+The validation includes:
+
+* Number of pipes (`NP`)
+* Pipe length count
+* Pipe length validity
+* Initial diameter count
+* Initial diameter validity
+* Diameter data consistency
+* Diameter/cost consistency
+* Fixed-pipe validity
+* Variable-pipe validity
+* Fixed/variable pipe overlap
+* Complete pipe-index coverage
+
+The validation ensures that fixed and variable pipe sets together represent the complete network pipe index set.
+
+---
+
+# Optimization Configuration
+
+Optimization parameters are assembled by:
+
+```text
+data/buildOptimizationParams.m
+```
+
+The resulting configuration contains:
+
+```text
+Params.NS
+Params.Pmin
+Params.Vmax
+Params.FixedPipes
+Params.VariablePipes
+Params.InitialD
+```
+
+The variable pipe set is automatically derived from the total number of network pipes and the validated fixed-pipe set.
+
+This separates configuration construction from validation and algorithm execution.
 
 ---
 
@@ -283,6 +372,8 @@ The interface contains controls for:
 * Fixed pipe IDs
 
 The results area provides optimization and hydraulic analysis information.
+
+Validation errors occurring during the optimization workflow are caught by the GUI `try/catch` mechanism and presented to the user through a MATLAB GUI alert.
 
 ---
 
@@ -334,8 +425,6 @@ The node results include:
 * Pressure
 * Constraint status
 
-Nodes can be identified according to their hydraulic constraint status.
-
 ### Hydraulic Summary
 
 The application reports hydraulic summary information such as:
@@ -368,6 +457,7 @@ The repository is organized into logical modules.
 
 ```text
 WDS-Optimizer/
+
 │
 ├── app/
 │   └── WDS_Optimizer_App.m
@@ -395,6 +485,12 @@ WDS-Optimizer/
 │   ├── buildOptimizationParams.m
 │   └── loadOptimizationData.m
 │
+├── validation/
+│   ├── validateOptimizationData.m
+│   ├── validateOptimizationParameters.m
+│   ├── validateFixedPipes.m
+│   └── validateNetworkConsistency.m
+│
 ├── utils/
 │   ├── createNodeResultsTable.m
 │   ├── createPipeResultsTable.m
@@ -411,6 +507,8 @@ WDS-Optimizer/
 ├── .gitignore
 └── README.md
 ```
+
+The `validation` directory contains the input and configuration validation layer introduced during Phase 2.
 
 The `utils` directory contains general-purpose result and export utilities.
 
@@ -450,7 +548,9 @@ Clone or download the repository:
 
 **WDS Optimization Toolkit**
 
+```text
 https://github.com/alirezakhatami98-ui/WDS-Optimizer
+```
 
 ## 2. Open MATLAB
 
@@ -466,7 +566,7 @@ Run the project setup procedure:
 setupWDSOptimizer
 ```
 
-The setup procedure is responsible for preparing the MATLAB environment for the project and its bundled dependencies.
+The setup procedure prepares the MATLAB environment for the project and its bundled dependencies.
 
 The project uses repository-relative paths rather than hard-coded paths belonging to a particular user's computer.
 
@@ -560,7 +660,9 @@ Click:
 
 **Run Single Optimization**
 
-The selected optimization algorithm will evaluate candidate designs using EPANET hydraulic simulation.
+The application first validates the supplied optimization parameters and configuration data.
+
+If the input passes validation, the selected optimization algorithm evaluates candidate designs using EPANET hydraulic simulation.
 
 ### Step 10 — Analyze Results
 
@@ -580,6 +682,58 @@ Use:
 **Export Excel (Multi-Sheet)**
 
 to export the calculated results.
+
+---
+
+# Validation Workflow
+
+The current validation flow is integrated into the optimization execution pipeline.
+
+The general execution sequence is:
+
+```text
+User Input
+    │
+    ▼
+Optimization Parameter Validation
+    │
+    ▼
+Load Diameter & Cost Data
+    │
+    ▼
+Diameter/Cost Validation
+    │
+    ▼
+Create Temporary INP
+    │
+    ▼
+Update Headloss Formula
+    │
+    ▼
+Initialize EPANET Network
+    │
+    ▼
+Validate Fixed Pipes
+    │
+    ▼
+Build Optimization Parameters
+    │
+    ▼
+Network/Data Consistency Validation
+    │
+    ▼
+Run GA / PSO
+    │
+    ▼
+Hydraulic Evaluation
+    │
+    ▼
+Display Results
+```
+
+Validation errors generated during the optimization workflow are propagated to the GUI execution layer and displayed to the user through an error dialog.
+
+This prevents invalid configuration data from silently reaching the optimization algorithms.
 
 ---
 
@@ -604,12 +758,13 @@ Professional temporary-file lifecycle management is planned for a later developm
 
 # Development Architecture
 
-The repository is being developed incrementally.
-
-The architecture is intentionally divided into functional layers:
+The repository is divided into functional layers:
 
 ```text
 GUI
+ │
+ ▼
+Validation / Configuration
  │
  ▼
 Algorithms
@@ -626,13 +781,15 @@ EPANET
 
 Supporting data and utility modules are separated from the computational layers.
 
-This structure is intended to improve:
+The architecture is intended to improve:
 
 * Maintainability
 * Readability
 * Testability
 * Extensibility
 * Separation of concerns
+
+The validation layer introduced in Phase 2 provides an explicit boundary between user-provided configuration and the computational optimization pipeline.
 
 ---
 
@@ -660,21 +817,32 @@ Completed activities include:
 
 ## Phase 2 — Input Validation & Configuration
 
-**Status: Next**
+**Status: Completed**
 
-Planned work includes systematic validation of:
+Phase 2 introduced a structured validation and configuration layer.
 
-* Optimization parameters
-* Hydraulic constraints
-* Diameter data
-* Cost data
-* Network data
-* Fixed pipe IDs
-* Network/data consistency
+Completed activities include:
+
+* Optimization parameter validation
+* Hydraulic constraint validation
+* Diameter data validation
+* Cost data validation
+* Fixed pipe ID validation
+* Network data consistency validation
+* Fixed/variable pipe consistency validation
+* Integration of validation into the GUI optimization workflow
+* GUI error handling for validation failures
+* Construction of a centralized optimization parameter structure
+* Functional testing of validation routines
+* Regression testing of the complete optimization workflow
+
+The final optimization workflow was tested after the Phase 2 changes and the optimization executed successfully.
 
 ---
 
 ## Phase 3 — Temporary Files & EPANET Lifecycle
+
+**Status: Planned**
 
 Planned improvements include:
 
@@ -689,17 +857,23 @@ Planned improvements include:
 
 ## Phase 4 — Unified Optimization Problem
 
+**Status: Planned**
+
 A unified optimization problem definition will be developed for GA and PSO.
 
 ---
 
 ## Phase 5 — Constraint Handling
 
+**Status: Planned**
+
 Constraint evaluation, feasibility and penalty handling will be reviewed and unified.
 
 ---
 
 ## Phase 6 — Genetic Algorithm Improvement
+
+**Status: Planned**
 
 The GA implementation will be reviewed for:
 
@@ -716,11 +890,15 @@ The GA implementation will be reviewed for:
 
 ## Phase 7 — Discrete PSO Improvement
 
+**Status: Planned**
+
 The suitability of the current PSO implementation for discrete pipe-diameter optimization will be scientifically evaluated.
 
 ---
 
 ## Phase 8 — Performance Optimization
+
+**Status: Planned**
 
 Potential improvements include:
 
@@ -737,11 +915,15 @@ Parallel execution will only be considered after compatibility with EPANET and M
 
 ## Phase 9 — Reproducibility
 
+**Status: Planned**
+
 Random seed control will be introduced to support reproducible optimization experiments.
 
 ---
 
 ## Phase 10 — Benchmark / Experiment Framework
+
+**Status: Planned**
 
 A formal experimental framework will be developed for comparing algorithms using:
 
@@ -753,9 +935,13 @@ A formal experimental framework will be developed for comparing algorithms using
 * Feasibility rate
 * Convergence comparison
 
+Benchmark functionality is intentionally not part of the current single-optimization workflow and will be reintroduced in a later development phase.
+
 ---
 
 ## Phase 11 — GUI Enhancement
+
+**Status: Planned**
 
 Planned GUI improvements include:
 
@@ -771,11 +957,15 @@ Planned GUI improvements include:
 
 ## Phase 12 — Professional Reporting
 
+**Status: Planned**
+
 The reporting system will be expanded to provide structured optimization and hydraulic reports.
 
 ---
 
 ## Phase 13 — Testing
+
+**Status: Planned / Progressive**
 
 The project will progressively include:
 
@@ -785,9 +975,13 @@ The project will progressively include:
 * Optimization validation
 * Reproducible benchmark networks
 
+Testing is being introduced incrementally alongside the architectural development phases.
+
 ---
 
 ## Phase 14 — Final Documentation & Release
+
+**Status: Planned**
 
 Final documentation and release preparation will be performed after the architecture and capabilities have stabilized.
 
@@ -799,8 +993,12 @@ Final documentation and release preparation will be performed after the architec
 
 **Phase 1:** Completed
 
-**Current next phase:** Phase 2 — Input Validation & Configuration
+**Phase 2:** Completed
 
-The existing optimization functionality has been tested after the Phase 1 repository refactoring.
+**Current next phase:** Phase 3 — Temporary Files & EPANET Lifecycle
 
-Future phases will be implemented incrementally, with functional testing performed after each phase.
+The repository has completed its initial architecture refactoring and the input validation/configuration layer.
+
+The optimization functionality has been regression-tested after the Phase 2 changes, and single optimization runs have been successfully executed.
+
+The project will continue through the remaining development phases incrementally, with functional testing performed after each major change.

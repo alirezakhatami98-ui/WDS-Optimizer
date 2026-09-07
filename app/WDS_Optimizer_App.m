@@ -94,8 +94,16 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
         % --- Main Optimization Routing ---
         function RunOptimization(app, ~)
-            if isempty(app.InpFileStr) || isempty(app.DFileStr) || isempty(app.CostFileStr)
-                uialert(app.UIFigure, 'Please load all required input files first!', 'Input Error');
+
+            if isempty(app.InpFileStr) || ...
+               isempty(app.DFileStr) || ...
+               isempty(app.CostFileStr)
+
+                uialert( ...
+                    app.UIFigure, ...
+                    'Please load all required input files first!', ...
+                    'Input Error');
+
                 return;
             end
 
@@ -103,9 +111,19 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.RunButton.Enable = 'off';
             drawnow;
 
+            d = [];
+
             try
-                [d, Din, Cost, D, NP, L, ~, Params, MaxGen] = app.PrepareEnvironment();
-                
+
+                validateOptimizationParameters( ...
+                    app.NSEditField.Value, ...
+                    app.MaxGenEditField.Value, ...
+                    app.PminEditField.Value, ...
+                    app.VmaxEditField.Value);
+
+                [d, Din, Cost, D, NP, L, ~, Params, MaxGen] = ...
+                    app.PrepareEnvironment();
+
                 SelectedAlg = app.AlgorithmDropDown.Value;
 
                 if strcmp(SelectedAlg, 'Genetic Algorithm (GA)')
@@ -137,18 +155,36 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     grid(app.UIAxes, 'on');
 
                 end
-         
+
                 app.UpdateGUIResults(d, Score, Position, NP, Params);
+
                 d.unload();
+                d = [];
 
                 app.StatusLabel.Text = 'Status: Completed Successfully!';
                 app.ExportButton.Enable = 'on';
+
             catch ME
+
+                if ~isempty(d)
+                    try
+                        d.unload();
+                    catch
+                        % Ignore cleanup errors and preserve the original error.
+                    end
+                end
+
                 app.StatusLabel.Text = 'Status: Error occurred!';
-                uialert(app.UIFigure, ME.message, 'Execution Error');
+
+                uialert( ...
+                    app.UIFigure, ...
+                    ME.message, ...
+                    'Execution Error');
+
             end
 
             app.RunButton.Enable = 'on';
+
         end
 
         % --- Environment Setup Helper ---
@@ -156,6 +192,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             
             [Din, Cost, D] = loadOptimizationData( ...
                 app.DFileStr, app.CostFileStr);
+
+            validateOptimizationData(D, Cost);
 
             tempInpPath = createTempInpFile(app.InpFileStr);
 
@@ -165,15 +203,30 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             % 2. Load the updated INP file in EPANET
             [d, NP, L, InitialD] = initializeNetwork(tempInpPath);
 
+            fixedPipes = validateFixedPipes( ...
+                app.FixedPipesEditField.Value, ...
+                NP);
+
             Params = buildOptimizationParams( ...
                 app.NSEditField.Value, ...
                 app.PminEditField.Value, ...
                 app.VmaxEditField.Value, ...
-                app.FixedPipesEditField.Value, ...
+                fixedPipes, ...
                 NP, ...
                 InitialD);
 
+            validateNetworkConsistency( ...
+                NP, ...
+                L, ...
+                InitialD, ...
+                Din, ...
+                D, ...
+                Cost, ...
+                Params.FixedPipes, ...
+                Params.VariablePipes);
+
             MaxGen = app.MaxGenEditField.Value;
+           
         end
 
         % --- Results Updater ---

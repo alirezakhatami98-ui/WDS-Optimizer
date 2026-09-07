@@ -1,23 +1,11 @@
 function Params = buildOptimizationParams( ...
-    NS, Pmin, Vmax, FixedPipeString, NP, InitialD)
-
-    fixedStr = strtrim(FixedPipeString);
-    fixedPipes = [];
-
-    if ~isempty(fixedStr)
-        try
-            fixedPipes = str2num(fixedStr); %#ok<ST2NM>
-            fixedPipes = fixedPipes(fixedPipes >= 1 & fixedPipes <= NP);
-        catch
-            fixedPipes = [];
-        end
-    end
+    NS, Pmin, Vmax, FixedPipes, NP, InitialD)
 
     Params.NS = NS;
     Params.Pmin = Pmin;
     Params.Vmax = Vmax;
-    Params.FixedPipes = fixedPipes;
-    Params.VariablePipes = setdiff(1:NP, fixedPipes);
+    Params.FixedPipes = FixedPipes;
+    Params.VariablePipes = setdiff(1:NP, FixedPipes);
     Params.InitialD = InitialD;
 
 end

@@ -35,6 +35,7 @@ function setupWDSOptimizer()
         'hydraulics'
         'data'
         'utils'
+        'validation'
     };
 
     for i = 1:numel(sourceFolders)
