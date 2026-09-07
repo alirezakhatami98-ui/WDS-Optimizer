@@ -70,7 +70,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         function SelectINPFile(app, ~)
             [file, path] = uigetfile('*.inp', 'Select EPANET .inp File');
             if ischar(file)
-                fullPath = strrep(fullfile(path, file), '\', '/');
+                fullPath = fullfile(path, file);
                 app.InpFileStr = fullPath;
                 app.INPLabel.Text = file;
             end
