@@ -739,20 +739,80 @@ This prevents invalid configuration data from silently reaching the optimization
 
 # Temporary Files
 
-The application currently creates temporary EPANET files during execution.
+The application creates temporary EPANET input files during optimization.
 
-Typical temporary files include:
+Temporary files are created using MATLAB's system temporary directory and are uniquely named for each execution.
+
+Typical runtime artifacts include:
 
 ```text
-temp_network*.inp
-temp_network*.txt
+<temporary-name>.inp
+<temporary-name>.txt
+<temporary-name>_temp.inp
+<temporary-name>_temp.txt
+<temporary-name>_temp.bin
 ```
 
 These files are runtime artifacts and are not intended to be committed to the repository.
 
-They are excluded through `.gitignore`.
+The temporary-file lifecycle is managed automatically.
 
-Professional temporary-file lifecycle management is planned for a later development phase.
+The application:
+
+* creates a unique temporary INP file
+* uses the temporary INP file for EPANET initialization
+* preserves the original user-provided INP file
+* removes generated temporary files after execution
+* performs cleanup during both successful and failed execution paths
+
+Temporary-file cleanup is implemented through:
+
+```text
+hydraulics/cleanupTempInpFiles.m
+```
+
+The cleanup routine safely checks for generated files before attempting deletion and ignores cleanup errors so that secondary cleanup failures do not mask the original execution error.
+
+
+---
+
+# EPANET Object Lifecycle
+
+EPANET network objects are explicitly managed during the optimization workflow.
+
+The EPANET object is created during network initialization and is unloaded after it is no longer required.
+
+The lifecycle is designed to cover both normal and exceptional execution paths.
+
+The main lifecycle components are:
+
+```text
+Create Temporary INP
+        │
+        ▼
+Initialize EPANET Object
+        │
+        ▼
+Hydraulic / Optimization Evaluation
+        │
+        ▼
+Unload EPANET Object
+        │
+        ▼
+Remove Temporary Files
+```
+
+EPANET cleanup is implemented through:
+
+```text
+hydraulics/cleanupEpanetObject.m
+```
+
+The network initialization routine also protects against initialization failures. If an EPANET object has been created but an error occurs before ownership is returned to the caller, the initialization routine unloads the object before rethrowing the original error.
+
+This prevents EPANET objects from remaining loaded after failed initialization.
+
+The main application workflow also performs EPANET cleanup in both successful and failed optimization paths.
 
 ---
 
@@ -842,16 +902,27 @@ The final optimization workflow was tested after the Phase 2 changes and the opt
 
 ## Phase 3 — Temporary Files & EPANET Lifecycle
 
-**Status: Planned**
+**Status: Completed**
 
-Planned improvements include:
+Phase 3 established controlled temporary-file management and explicit EPANET object lifecycle handling.
 
-* Unique temporary files
-* Appropriate temporary directories
-* Automatic cleanup
-* Error-safe cleanup
-* Robust EPANET object lifecycle
-* Proper unloading during exceptions
+Completed activities include:
+
+* Unique temporary INP file creation
+* Use of MATLAB's temporary directory
+* Explicit ownership of temporary files
+* Automatic cleanup of temporary EPANET artifacts
+* Cleanup after successful execution
+* Exception-safe cleanup after failed execution
+* Explicit EPANET object unloading
+* Exception-safe EPANET cleanup during network initialization
+* Cleanup integration into the main optimization workflow
+* Regression testing of temporary-file cleanup
+* Regression testing of EPANET object unloading
+* Verification that temporary `.inp`, `.txt`, and `.bin` files do not remain after successful execution
+
+The Phase 3 implementation preserves the original user-provided EPANET input file and confines generated runtime artifacts to the system temporary directory.
+
 
 ---
 
@@ -995,10 +1066,14 @@ Final documentation and release preparation will be performed after the architec
 
 **Phase 2:** Completed
 
-**Current next phase:** Phase 3 — Temporary Files & EPANET Lifecycle
+**Phase 3:** Completed
 
-The repository has completed its initial architecture refactoring and the input validation/configuration layer.
+**Current next phase:** Phase 4 — Unified Optimization Problem
 
-The optimization functionality has been regression-tested after the Phase 2 changes, and single optimization runs have been successfully executed.
+The repository has completed its initial architecture refactoring, input validation/configuration layer, and temporary-file / EPANET lifecycle management.
+
+The optimization functionality has been regression-tested after the Phase 2 and Phase 3 changes, and single optimization runs have been successfully executed.
+
+Temporary EPANET files are automatically cleaned up after execution, and EPANET objects are explicitly unloaded during both successful and exceptional execution paths.
 
 The project will continue through the remaining development phases incrementally, with functional testing performed after each major change.

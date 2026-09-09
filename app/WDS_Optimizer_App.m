@@ -112,6 +112,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             drawnow;
 
             d = [];
+            tempInpPath = '';
 
             try
 
@@ -121,7 +122,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     app.PminEditField.Value, ...
                     app.VmaxEditField.Value);
 
-                [d, Din, Cost, D, NP, L, ~, Params, MaxGen] = ...
+                [d, Din, Cost, D, NP, L, ~, Params, MaxGen, tempInpPath] = ...
                     app.PrepareEnvironment();
 
                 SelectedAlg = app.AlgorithmDropDown.Value;
@@ -158,21 +159,19 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 app.UpdateGUIResults(d, Score, Position, NP, Params);
 
-                d.unload();
+                cleanupEpanetObject(d);
                 d = [];
+
+                cleanupTempInpFiles(tempInpPath);
 
                 app.StatusLabel.Text = 'Status: Completed Successfully!';
                 app.ExportButton.Enable = 'on';
 
             catch ME
 
-                if ~isempty(d)
-                    try
-                        d.unload();
-                    catch
-                        % Ignore cleanup errors and preserve the original error.
-                    end
-                end
+                cleanupEpanetObject(d);
+
+                cleanupTempInpFiles(tempInpPath);
 
                 app.StatusLabel.Text = 'Status: Error occurred!';
 
@@ -188,45 +187,61 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         end
 
         % --- Environment Setup Helper ---
-        function [d, Din, Cost, D, NP, L, InitialD, Params, MaxGen] = PrepareEnvironment(app)
-            
-            [Din, Cost, D] = loadOptimizationData( ...
-                app.DFileStr, app.CostFileStr);
+        function [d, Din, Cost, D, NP, L, InitialD, Params, MaxGen, tempInpPath] = PrepareEnvironment(app)
 
-            validateOptimizationData(D, Cost);
+            d = [];
+            tempInpPath = '';
 
-            tempInpPath = createTempInpFile(app.InpFileStr);
+            try
 
-            % 1. Update Headloss Formula directly inside the INP text file
-            UpdateInpHeadlossFormula(tempInpPath, app.HeadlossDropDown.Value);
+                [Din, Cost, D] = loadOptimizationData( ...
+                    app.DFileStr, app.CostFileStr);
 
-            % 2. Load the updated INP file in EPANET
-            [d, NP, L, InitialD] = initializeNetwork(tempInpPath);
+                validateOptimizationData(D, Cost);
 
-            fixedPipes = validateFixedPipes( ...
-                app.FixedPipesEditField.Value, ...
-                NP);
+                tempInpPath = createTempInpFile(app.InpFileStr);
 
-            Params = buildOptimizationParams( ...
-                app.NSEditField.Value, ...
-                app.PminEditField.Value, ...
-                app.VmaxEditField.Value, ...
-                fixedPipes, ...
-                NP, ...
-                InitialD);
+                % 1. Update Headloss Formula directly inside the INP text file
+                UpdateInpHeadlossFormula( ...
+                    tempInpPath, ...
+                    app.HeadlossDropDown.Value);
 
-            validateNetworkConsistency( ...
-                NP, ...
-                L, ...
-                InitialD, ...
-                Din, ...
-                D, ...
-                Cost, ...
-                Params.FixedPipes, ...
-                Params.VariablePipes);
+                % 2. Load the updated INP file in EPANET
+                [d, NP, L, InitialD] = initializeNetwork(tempInpPath);
 
-            MaxGen = app.MaxGenEditField.Value;
-           
+                fixedPipes = validateFixedPipes( ...
+                    app.FixedPipesEditField.Value, ...
+                    NP);
+
+                Params = buildOptimizationParams( ...
+                    app.NSEditField.Value, ...
+                    app.PminEditField.Value, ...
+                    app.VmaxEditField.Value, ...
+                    fixedPipes, ...
+                    NP, ...
+                    InitialD);
+
+                validateNetworkConsistency( ...
+                    NP, ...
+                    L, ...
+                    InitialD, ...
+                    Din, ...
+                    D, ...
+                    Cost, ...
+                    Params.FixedPipes, ...
+                    Params.VariablePipes);
+
+                MaxGen = app.MaxGenEditField.Value;
+
+            catch ME
+
+                cleanupEpanetObject(d);
+                cleanupTempInpFiles(tempInpPath);
+
+                rethrow(ME);
+
+            end
+
         end
 
         % --- Results Updater ---
