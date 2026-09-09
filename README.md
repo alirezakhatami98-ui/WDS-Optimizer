@@ -476,6 +476,8 @@ WDS-Optimizer/
 │
 ├── hydraulics/
 │   ├── calculateHydraulicResults.m
+    ├── cleanupEpanetObject.m
+    ├── cleanupTempInpFiles.m
 │   ├── createTempInpFile.m
 │   ├── initializeNetwork.m
 │   ├── runHydraulicSimulation.m
