@@ -20,7 +20,7 @@ function [Score, Position, Conv] = runGA(d, Problem, Config)
 
     Pop = randi(ND, NVar, NS);
 
-    [cost, viol, feas] = evaluatePopulation(Pop, Problem, d);
+    [cost, viol, ~] = evaluatePopulation(Pop, Problem, d);
 
     for G = 1:MaxGen
 
