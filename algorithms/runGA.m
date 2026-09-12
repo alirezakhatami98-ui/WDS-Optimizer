@@ -1,22 +1,11 @@
-function [Score, Position, Conv] = runGA(d, D, NP, L, Din, Cost, Params, MaxGen)
+function [Score, Position, Conv] = runGA(d, Problem, Config)
 
-    Problem.d = d;
-    Problem.D = D;
-    Problem.NP = NP;
-    Problem.L = L;
-    Problem.Din = Din;
+    NS = Config.NS;
+    MaxGen = Config.MaxGen;
 
-    Problem.Cost = Cost;
-    Problem.Pmin = Params.Pmin;
-    Problem.Vmax = Params.Vmax;
-
-    Problem.VariablePipes = Params.VariablePipes;
-    Problem.InitialD = Params.InitialD;
-
-    NS = Params.NS;
     Pc = 0.8;
     Pm = 0.03;
-    ND = numel(D);
+    ND = numel(Problem.D);
 
     NVar = numel(Problem.VariablePipes);
 
@@ -31,7 +20,7 @@ function [Score, Position, Conv] = runGA(d, D, NP, L, Din, Cost, Params, MaxGen)
 
     Pop = randi(ND, NVar, NS);
 
-    [cost, viol, feas] = evaluatePopulation(Pop, Problem);
+    [cost, viol, feas] = evaluatePopulation(Pop, Problem, d);
 
     for G = 1:MaxGen
 
@@ -74,42 +63,31 @@ function [Score, Position, Conv] = runGA(d, D, NP, L, Din, Cost, Params, MaxGen)
         end
 
         if ~isempty(BestSolEver)
-
             NewPop(:, 1) = BestSolEver;
-
         elseif ~isempty(BestUnfeasibleSol)
-
             NewPop(:, 1) = BestUnfeasibleSol;
-
         end
 
         Pop = NewPop;
 
-        [cost, viol, feas] = evaluatePopulation(Pop, Problem);
+        [cost, viol, feas] = evaluatePopulation(Pop, Problem, d);
 
         feasible_idx = find(feas);
 
         if ~isempty(feasible_idx)
-
             [min_c, k] = min(cost(feasible_idx));
-
             if min_c < BestCostEver
-
                 BestCostEver = min_c;
                 BestSolEver = Pop(:, feasible_idx(k));
-
             end
-
         end
 
         [min_v, idx_v] = min(viol);
 
         if min_v < BestViolEver
-
             BestViolEver = min_v;
             BestUnfeasibleSol = Pop(:, idx_v);
             BestUnfeasibleCost = cost(idx_v);
-
         end
 
         if ~isempty(BestSolEver)
@@ -121,18 +99,15 @@ function [Score, Position, Conv] = runGA(d, D, NP, L, Din, Cost, Params, MaxGen)
     end
 
     if isempty(BestSolEver)
-
         BestSolEver = BestUnfeasibleSol;
         BestCostEver = BestUnfeasibleCost;
-
     end
 
     Score = BestCostEver;
 
     FullDiameters = Problem.InitialD;
-
     FullDiameters(Problem.VariablePipes) = ...
-        D(BestSolEver);
+        Problem.D(BestSolEver);
 
     Position = FullDiameters';
 

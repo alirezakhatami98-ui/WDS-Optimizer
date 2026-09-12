@@ -1,6 +1,5 @@
-function [cost, viol, feas] = evaluateSolution(ind, Problem)
+function [cost, viol, feas] = evaluateSolution(ind, Problem, d)
 
-    d = Problem.d;
     D = Problem.D;
     NP = Problem.NP;
     L = Problem.L;

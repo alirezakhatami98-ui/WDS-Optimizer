@@ -122,6 +122,33 @@ For each variable pipe, the optimizer selects one diameter from the available di
 
 Fixed pipes are excluded from the optimization variables and retain their initial network diameters.
 
+The optimization problem is represented centrally by the `Problem` structure. This provides a unified representation of the engineering optimization problem shared by both GA and PSO.
+
+The current `Problem` structure contains:
+
+```text
+Problem.Din
+Problem.Cost
+Problem.D
+Problem.NP
+Problem.L
+Problem.InitialD
+Problem.FixedPipes
+Problem.VariablePipes
+Problem.Pmin
+Problem.Vmax
+```
+
+The `Problem` structure contains problem-specific data and constraints, while algorithm execution settings are kept separate in the `Config` structure.
+
+The unified problem representation is constructed by:
+
+```text
+optimization/buildOptimizationProblem.m
+```
+
+Both optimization algorithms consume the same `Problem` representation. This prevents the optimization problem definition from being duplicated across GA and PSO implementations.
+
 ---
 
 # Decision Variables
@@ -331,26 +358,41 @@ The validation ensures that fixed and variable pipe sets together represent the 
 
 # Optimization Configuration
 
-Optimization parameters are assembled by:
+Optimization execution settings are separated from the engineering optimization problem.
+
+The optimization problem is represented by:
 
 ```text
-data/buildOptimizationParams.m
+Problem
 ```
 
-The resulting configuration contains:
+and algorithm execution settings are represented by:
 
 ```text
-Params.NS
-Params.Pmin
-Params.Vmax
-Params.FixedPipes
-Params.VariablePipes
-Params.InitialD
+Config
 ```
 
-The variable pipe set is automatically derived from the total number of network pipes and the validated fixed-pipe set.
+The current algorithm configuration contains:
 
-This separates configuration construction from validation and algorithm execution.
+```text
+Config.NS
+Config.MaxGen
+```
+
+where:
+
+* `NS` is the population/swarm size.
+* `MaxGen` is the maximum number of generations/iterations.
+
+The algorithm configuration is constructed by:
+
+```text
+algorithms/buildAlgorithmConfig.m
+```
+
+This separation ensures that engineering problem data and algorithm execution settings are not mixed together.
+
+The `Problem` structure is shared by GA and PSO, while each algorithm remains responsible for its own search mechanism.
 
 ---
 
@@ -463,11 +505,13 @@ WDS-Optimizer/
 │   └── WDS_Optimizer_App.m
 │
 ├── algorithms/
+│   ├── buildAlgorithmConfig.m
 │   ├── runGA.m
 │   ├── runPSO.m
 │   └── selectionRoulette.m
 │
 ├── optimization/
+│   ├── buildOptimizationProblem.m
 │   ├── calculateCost.m
 │   ├── calculateFitness.m
 │   ├── checkConstraints.m
@@ -476,15 +520,14 @@ WDS-Optimizer/
 │
 ├── hydraulics/
 │   ├── calculateHydraulicResults.m
-    ├── cleanupEpanetObject.m
-    ├── cleanupTempInpFiles.m
+│   ├── cleanupEpanetObject.m
+│   ├── cleanupTempInpFiles.m
 │   ├── createTempInpFile.m
 │   ├── initializeNetwork.m
 │   ├── runHydraulicSimulation.m
 │   └── UpdateInpHeadlossFormula.m
 │
 ├── data/
-│   ├── buildOptimizationParams.m
 │   └── loadOptimizationData.m
 │
 ├── validation/
@@ -512,9 +555,15 @@ WDS-Optimizer/
 
 The `validation` directory contains the input and configuration validation layer introduced during Phase 2.
 
+The `optimization` directory contains the centralized optimization problem representation and the optimization evaluation functions.
+
+The `algorithms` directory contains the optimization algorithms and algorithm configuration construction.
+
 The `utils` directory contains general-purpose result and export utilities.
 
 The previous `results` directory was reorganized into `utils` during the repository architecture refactoring.
+
+The previous `buildOptimizationParams.m` configuration builder was removed during Phase 4. Its responsibilities were separated into the unified `Problem` representation and the algorithm `Config` structure.
 
 ---
 
@@ -825,25 +874,45 @@ The repository is divided into functional layers:
 ```text
 GUI
  │
- ▼
-Validation / Configuration
+ ├── Validation
  │
- ▼
-Algorithms
+ ├── Problem Construction
+ │       │
+ │       └── Problem
  │
- ▼
-Optimization
- │
- ▼
-Hydraulics
- │
- ▼
-EPANET
+ └── Algorithm Configuration
+         │
+         └── Config
+                │
+                ▼
+           GA / PSO
+                │
+                ▼
+          Optimization
+                │
+                ▼
+           Hydraulics
+                │
+                ▼
+              EPANET
 ```
 
-Supporting data and utility modules are separated from the computational layers.
+The main architectural responsibilities are:
 
-The architecture is intended to improve:
+* **GUI** — user interaction and execution workflow.
+* **Validation** — validation of user input and network/optimization data.
+* **Problem Construction** — creation of the unified engineering optimization problem.
+* **Algorithm Configuration** — construction of algorithm execution settings.
+* **Algorithms** — GA and PSO search mechanisms.
+* **Optimization** — candidate-solution evaluation, objective calculation, and constraint evaluation.
+* **Hydraulics** — EPANET-based hydraulic simulation.
+* **EPANET** — hydraulic computation engine.
+
+The `Problem` structure contains the engineering optimization problem and is shared by GA and PSO.
+
+The `Config` structure contains algorithm execution settings and is passed separately to the selected optimization algorithm.
+
+This architecture is intended to improve:
 
 * Maintainability
 * Readability
@@ -852,6 +921,8 @@ The architecture is intended to improve:
 * Separation of concerns
 
 The validation layer introduced in Phase 2 provides an explicit boundary between user-provided configuration and the computational optimization pipeline.
+
+Phase 4 further separates the definition of the optimization problem from the algorithm-specific search configuration.
 
 ---
 
@@ -930,9 +1001,32 @@ The Phase 3 implementation preserves the original user-provided EPANET input fil
 
 ## Phase 4 — Unified Optimization Problem
 
-**Status: Planned**
+**Status: Completed**
 
-A unified optimization problem definition will be developed for GA and PSO.
+Phase 4 introduced a unified representation of the optimization problem and separated it from algorithm execution configuration.
+
+Completed activities include:
+
+* Analysis of the existing optimization problem representation
+* Definition of the unified `Problem` structure
+* Centralized construction of the optimization problem
+* Migration of GA to the unified `Problem` representation
+* Migration of PSO to the unified `Problem` representation
+* Separation of algorithm configuration into the `Config` structure
+* Introduction of `buildAlgorithmConfig.m`
+* Removal of the obsolete `buildOptimizationParams.m`
+* Simplification of redundant argument passing
+* Separation of EPANET runtime resources from the optimization problem representation
+* Review of the optimization evaluation interfaces
+* Regression testing of GA and PSO
+* Regression testing of hydraulic headloss formulations
+* Regression testing of fixed-pipe configurations
+* Regression testing of hydraulic constraints
+* Regression testing of input and network validation
+* Regression testing of temporary-file and EPANET cleanup
+* Multiple consecutive optimization runs without restarting MATLAB
+
+The final Phase 4 architecture uses a shared `Problem` representation for both GA and PSO while keeping algorithm execution settings in a separate `Config` structure.
 
 ---
 
@@ -1070,12 +1164,12 @@ Final documentation and release preparation will be performed after the architec
 
 **Phase 3:** Completed
 
-**Current next phase:** Phase 4 — Unified Optimization Problem
+**Phase 4:** Completed
 
-The repository has completed its initial architecture refactoring, input validation/configuration layer, and temporary-file / EPANET lifecycle management.
+**Current next phase:** Phase 5 — Constraint Handling
 
-The optimization functionality has been regression-tested after the Phase 2 and Phase 3 changes, and single optimization runs have been successfully executed.
+The repository has completed its initial architecture refactoring, input validation/configuration layer, temporary-file and EPANET lifecycle management, and unified optimization problem representation.
 
-Temporary EPANET files are automatically cleaned up after execution, and EPANET objects are explicitly unloaded during both successful and exceptional execution paths.
+The optimization functionality has been regression-tested after the Phase 4 changes, including repeated GA and PSO executions and multiple supported hydraulic configurations.
 
 The project will continue through the remaining development phases incrementally, with functional testing performed after each major change.

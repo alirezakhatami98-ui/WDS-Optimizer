@@ -122,17 +122,16 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     app.PminEditField.Value, ...
                     app.VmaxEditField.Value);
 
-                [d, Din, Cost, D, NP, L, ~, Params, MaxGen, tempInpPath] = ...
+                [d, tempInpPath, Problem, Config] = ...
                     app.PrepareEnvironment();
 
                 SelectedAlg = app.AlgorithmDropDown.Value;
 
                 if strcmp(SelectedAlg, 'Genetic Algorithm (GA)')
 
-                    [Score, Position, Conv] = ...
-                        runGA(d, D, NP, L, Din, Cost, Params, MaxGen);
+                    [Score, Position, Conv] = runGA(d, Problem, Config);
 
-                    plot(app.UIAxes, 1:MaxGen, Conv, ...
+                    plot(app.UIAxes, 1:Config.MaxGen, Conv, ...
                         'LineWidth', 2, ...
                         'Color', [0.85 0.32 0.1]);
 
@@ -143,10 +142,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 else
 
-                    [Score, Position, Conv] = ...
-                        runPSO(d, D, NP, L, Din, Cost, Params, MaxGen);
+                    [Score, Position, Conv] = runPSO(d, Problem, Config);
 
-                    plot(app.UIAxes, 1:MaxGen, Conv, ...
+                    plot(app.UIAxes, 1:Config.MaxGen, Conv, ...
                         'LineWidth', 2, ...
                         'Color', [0.0 0.45 0.74]);
 
@@ -157,7 +155,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 end
 
-                app.UpdateGUIResults(d, Score, Position, NP, Params);
+                app.UpdateGUIResults(d, Score, Position, Problem);
 
                 cleanupEpanetObject(d);
                 d = [];
@@ -187,7 +185,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         end
 
         % --- Environment Setup Helper ---
-        function [d, Din, Cost, D, NP, L, InitialD, Params, MaxGen, tempInpPath] = PrepareEnvironment(app)
+        function [d, tempInpPath, Problem, Config] = PrepareEnvironment(app)
 
             d = [];
             tempInpPath = '';
@@ -210,28 +208,25 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 [d, NP, L, InitialD] = initializeNetwork(tempInpPath);
 
                 fixedPipes = validateFixedPipes( ...
-                    app.FixedPipesEditField.Value, ...
-                    NP);
+                    app.FixedPipesEditField.Value, NP);
 
-                Params = buildOptimizationParams( ...
-                    app.NSEditField.Value, ...
-                    app.PminEditField.Value, ...
-                    app.VmaxEditField.Value, ...
-                    fixedPipes, ...
-                    NP, ...
-                    InitialD);
+                variablePipes = setdiff(1:NP, fixedPipes);
 
                 validateNetworkConsistency( ...
-                    NP, ...
-                    L, ...
-                    InitialD, ...
-                    Din, ...
-                    D, ...
-                    Cost, ...
-                    Params.FixedPipes, ...
-                    Params.VariablePipes);
+                    NP, L, InitialD, Din, D, Cost, ...
+                    fixedPipes, variablePipes);
+
+                Problem = buildOptimizationProblem( ...
+                    Din, Cost, D, NP, L, InitialD, ...
+                    fixedPipes, variablePipes, ...
+                    app.PminEditField.Value, ...
+                    app.VmaxEditField.Value);
 
                 MaxGen = app.MaxGenEditField.Value;
+
+                Config = buildAlgorithmConfig( ...
+                    app.NSEditField.Value, ...
+                    MaxGen);
 
             catch ME
 
@@ -245,16 +240,16 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         end
 
         % --- Results Updater ---
-        function UpdateGUIResults(app, d, Score, Position, NP, Params)
+        function UpdateGUIResults(app, d, Score, Position, Problem)
             app.BestCost = Score;
             app.OptimalDiameters = Position';
 
             [app.NodePressures, app.PipeVelocities] = ...
-                calculateHydraulicResults(d, app.OptimalDiameters, NP);
+                calculateHydraulicResults(d, app.OptimalDiameters, Problem.NP);
 
             % Tab 1 Updates
             app.UITablePipes.Data = createPipeResultsTable( ...
-                NP, ...
+                Problem.NP, ...
                 app.OptimalDiameters, ...
                 app.PipeVelocities);
             app.CostSummaryLabel.Text = sprintf('Optimal Cost: $%.2f', app.BestCost);
@@ -262,18 +257,18 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             % Tab 2 Updates
             app.UITableNodes.Data = createNodeResultsTable( ...
                 app.NodePressures, ...
-                Params.Pmin);
+                Problem.Pmin);
             app.NodeStatusLabel.Text = sprintf('Min P: %.2fm | Max V: %.2fm/s', min(app.NodePressures), max(app.PipeVelocities));
 
             % Plots
             numNodes = numel(app.NodePressures);
 
             bar(app.PressureAxes, 1:numNodes, app.NodePressures, 0.6, 'FaceColor', [0 0.45 0.74]);
-            yline(app.PressureAxes, Params.Pmin, '--r', sprintf('Pmin (%.1fm)', Params.Pmin), 'LineWidth', 1.5);
+            yline(app.PressureAxes, Problem.Pmin, '--r', sprintf('Pmin (%.1fm)', Problem.Pmin), 'LineWidth', 1.5);
             grid(app.PressureAxes, 'on');
 
-            bar(app.VelocityAxes, 1:NP, app.PipeVelocities, 0.6, 'FaceColor', [0.47 0.67 0.19]);
-            yline(app.VelocityAxes, Params.Vmax, '--r', sprintf('Vmax (%.1fm/s)', Params.Vmax), 'LineWidth', 1.5);
+            bar(app.VelocityAxes, 1:Problem.NP, app.PipeVelocities, 0.6, 'FaceColor', [0.47 0.67 0.19]);
+            yline(app.VelocityAxes, Problem.Vmax, '--r', sprintf('Vmax (%.1fm/s)', Problem.Vmax), 'LineWidth', 1.5);
             grid(app.VelocityAxes, 'on');
         end        
 

@@ -1,20 +1,8 @@
-function [Score, Position, Conv] = runPSO(d, D, NP, L, Din, Cost, Params, MaxGen)
+function [Score, Position, Conv] = runPSO(d, Problem, Config)
 
-    Problem.d = d;
-    Problem.D = D;
-    Problem.NP = NP;
-    Problem.L = L;
-    Problem.Din = Din;
-
-    Problem.Cost = Cost;
-    Problem.Pmin = Params.Pmin;
-    Problem.Vmax = Params.Vmax;
-
-    Problem.VariablePipes = Params.VariablePipes;
-    Problem.InitialD = Params.InitialD;
-
-    N = Params.NS;
-    ND = numel(D);
+    N = Config.NS;
+    MaxGen = Config.MaxGen;
+    ND = numel(Problem.D);
     NVar = numel(Problem.VariablePipes);
 
     w = 0.7;
@@ -39,7 +27,7 @@ function [Score, Position, Conv] = runPSO(d, D, NP, L, Din, Cost, Params, MaxGen
         X_discrete = round(X);
         X_discrete = max(1, min(ND, X_discrete));
 
-        [cost, viol, feas] = evaluatePopulation(X_discrete, Problem);
+        [cost, viol, feas] = evaluatePopulation(X_discrete, Problem, d);
 
         for i = 1:N
 
@@ -84,7 +72,8 @@ function [Score, Position, Conv] = runPSO(d, D, NP, L, Din, Cost, Params, MaxGen
     Score = GBestCost;
 
     FullDiameters = Problem.InitialD;
-    FullDiameters(Problem.VariablePipes) = D(GBestX);
+    FullDiameters(Problem.VariablePipes) = ...
+        Problem.D(GBestX);
 
     Position = FullDiameters';
 

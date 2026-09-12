@@ -1,4 +1,4 @@
-function [cost, viol, feas] = evaluatePopulation(Pop, Problem)
+function [cost, viol, feas] = evaluatePopulation(Pop, Problem, d)
 
     NS = size(Pop, 2);
 
@@ -8,7 +8,7 @@ function [cost, viol, feas] = evaluatePopulation(Pop, Problem)
 
     for i = 1:NS
         [cost(i), viol(i), feas(i)] = ...
-            evaluateSolution(Pop(:, i), Problem);
+            evaluateSolution(Pop(:, i), Problem, d);
     end
 
 end
