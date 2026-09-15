@@ -74,6 +74,10 @@ The implemented GA currently includes:
 * Convergence tracking
 * Fixed-pipe support
 
+The GA uses constraint-aware fitness evaluation to guide the search toward solutions with lower constraint violation.
+
+The final GA solution is selected using feasibility-aware logic: feasible solutions are preferred, and among feasible solutions the solution with the lowest cost is retained. If no feasible solution is found, the best available infeasible solution is returned based on constraint violation.
+
 ## Particle Swarm Optimization (PSO)
 
 The implemented PSO currently includes:
@@ -86,7 +90,9 @@ The implemented PSO currently includes:
 * Convergence tracking
 * Fixed-pipe support
 
-Both algorithms operate on the same hydraulic optimization framework and evaluate candidate solutions through EPANET hydraulic simulation.
+For PSO, Personal Best and Global Best updates use the same feasibility-aware policy. Feasible solutions are preferred over infeasible solutions; among feasible solutions lower cost is preferred, while among infeasible solutions lower constraint violation is preferred.
+
+Both algorithms use the same centralized hydraulic constraint semantics through the common optimization evaluation framework.
 
 ---
 
@@ -206,6 +212,14 @@ Pj >= Pmin
 
 where `Pj` is the pressure at a junction.
 
+For constraint evaluation, pressure violation is normalized by the minimum pressure limit:
+
+```text
+PressureViolation = max(0, (Pmin - Pj) / Pmin)
+```
+
+The aggregate pressure violation is calculated as the mean normalized violation across the evaluated junctions.
+
 ## Maximum Velocity
 
 The user specifies:
@@ -220,9 +234,35 @@ Pipe velocity must satisfy:
 V <= Vmax
 ```
 
-Constraint violation is calculated from pressure deficiencies and velocity excesses.
+For constraint evaluation, velocity violation is normalized by the maximum velocity limit:
 
-A solution is considered feasible when the total constraint violation is zero.
+```text
+VelocityViolation = max(0, (V - Vmax) / Vmax)
+```
+
+The aggregate velocity violation is calculated as the mean normalized violation across the evaluated pipes.
+
+## Total Constraint Violation
+
+The total constraint violation is calculated as:
+
+```text
+ViolP = mean(PressureViolation)
+
+ViolV = mean(VelocityViolation)
+
+viol = ViolP + ViolV
+```
+
+The resulting violation value is dimensionless.
+
+A solution is considered feasible when:
+
+```text
+viol = 0
+```
+
+The same constraint semantics are used by both GA and PSO through the common optimization evaluation framework.
 
 ---
 
@@ -412,10 +452,13 @@ The interface contains controls for:
 * Minimum pressure
 * Maximum velocity
 * Fixed pipe IDs
+* Final solution cost and feasibility status
 
 The results area provides optimization and hydraulic analysis information.
 
 Validation errors occurring during the optimization workflow are caught by the GUI `try/catch` mechanism and presented to the user through a MATLAB GUI alert.
+
+The GUI displays the final solution cost together with its feasibility status, allowing the user to distinguish between a feasible optimized design and an infeasible fallback solution.
 
 ---
 
@@ -441,9 +484,25 @@ The pipe results include:
 * Optimized diameter
 * Pipe velocity
 
-### Optimal Cost
+### Optimization Cost and Feasibility
 
-The final objective value is displayed as the optimized network cost.
+The final optimization result includes both the solution cost and its feasibility status.
+
+The GUI displays the result in the form:
+
+```text
+Cost: $... | Feasible
+```
+
+or:
+
+```text
+Cost: $... | Infeasible
+```
+
+A feasible solution satisfies all hydraulic constraints.
+
+If no feasible solution is found, the optimization workflow may return an infeasible fallback solution. Such a result must be interpreted together with its displayed feasibility status rather than being treated as a fully feasible optimum.
 
 ---
 
@@ -885,16 +944,23 @@ GUI
          └── Config
                 │
                 ▼
-           GA / PSO
+            GA / PSO
                 │
                 ▼
-          Optimization
+            Optimization
                 │
-                ▼
-           Hydraulics
+                ├── Objective Evaluation
                 │
-                ▼
-              EPANET
+                └── Constraint Evaluation
+                        │
+                        ▼
+                checkConstraints.m
+                        │
+                        ▼
+                    Hydraulics
+                        │
+                        ▼
+                      EPANET
 ```
 
 The main architectural responsibilities are:
@@ -923,6 +989,16 @@ This architecture is intended to improve:
 The validation layer introduced in Phase 2 provides an explicit boundary between user-provided configuration and the computational optimization pipeline.
 
 Phase 4 further separates the definition of the optimization problem from the algorithm-specific search configuration.
+
+Constraint evaluation is centralized in:
+
+```text
+optimization/checkConstraints.m
+```
+
+Both GA and PSO receive constraint results through the common `evaluateSolution` and `evaluatePopulation` workflow rather than implementing separate pressure and velocity constraint definitions.
+
+This provides a single constraint policy for the optimization algorithms while keeping algorithm-specific search and ranking mechanisms separate.
 
 ---
 
@@ -1032,9 +1108,33 @@ The final Phase 4 architecture uses a shared `Problem` representation for both G
 
 ## Phase 5 — Constraint Handling
 
-**Status: Planned**
+**Status: Completed**
 
-Constraint evaluation, feasibility and penalty handling will be reviewed and unified.
+Phase 5 reviewed and refined the constraint evaluation, feasibility handling, and interaction between hydraulic constraints and optimization algorithms.
+
+Completed activities include:
+
+* Analysis of the existing constraint-handling workflow
+
+* Definition of normalized pressure and velocity constraint violations
+
+* Centralized constraint evaluation
+
+* Explicit feasibility determination
+
+* Review of GA penalty-based fitness handling
+
+* Review of PSO feasibility-aware Personal Best and Global Best ranking
+
+* Unification of hydraulic constraint semantics between GA and PSO
+
+* Propagation of final solution feasibility status to the GUI
+
+* Synthetic constraint regression testing
+
+* GA and PSO regression testing on the Two-Loop network
+
+The final Phase 5 implementation uses dimensionless normalized constraint violations and a common feasibility definition across the optimization framework.
 
 ---
 
@@ -1166,10 +1266,14 @@ Final documentation and release preparation will be performed after the architec
 
 **Phase 4:** Completed
 
-**Current next phase:** Phase 5 — Constraint Handling
+**Phase 5:** Completed
 
-The repository has completed its initial architecture refactoring, input validation/configuration layer, temporary-file and EPANET lifecycle management, and unified optimization problem representation.
+**Current next phase:** Phase 6 — Genetic Algorithm Improvement
 
-The optimization functionality has been regression-tested after the Phase 4 changes, including repeated GA and PSO executions and multiple supported hydraulic configurations.
+The repository has completed its initial architecture refactoring, input validation/configuration layer, temporary-file and EPANET lifecycle management, unified optimization problem representation, and constraint-handling refinement.
+
+Phase 5 established normalized hydraulic constraint violations, centralized constraint evaluation, feasibility-aware handling for GA and PSO, and explicit final feasibility reporting in the GUI.
+
+The optimization functionality has been regression-tested after the Phase 5 changes, including synthetic constraint tests and GA/PSO executions on the Two-Loop network.
 
 The project will continue through the remaining development phases incrementally, with functional testing performed after each major change.

@@ -1,4 +1,4 @@
-function [Score, Position, Conv] = runPSO(d, Problem, Config)
+function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
 
     N = Config.NS;
     MaxGen = Config.MaxGen;
@@ -70,11 +70,11 @@ function [Score, Position, Conv] = runPSO(d, Problem, Config)
     end
 
     Score = GBestCost;
+    Feasible = (GBestViol == 0);
 
     FullDiameters = Problem.InitialD;
     FullDiameters(Problem.VariablePipes) = ...
         Problem.D(GBestX);
-
     Position = FullDiameters';
 
 end

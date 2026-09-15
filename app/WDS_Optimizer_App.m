@@ -129,7 +129,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 if strcmp(SelectedAlg, 'Genetic Algorithm (GA)')
 
-                    [Score, Position, Conv] = runGA(d, Problem, Config);
+                    [Score, Position, Conv, Feasible] = runGA(d, Problem, Config);
 
                     plot(app.UIAxes, 1:Config.MaxGen, Conv, ...
                         'LineWidth', 2, ...
@@ -142,7 +142,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 else
 
-                    [Score, Position, Conv] = runPSO(d, Problem, Config);
+                    [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config);
 
                     plot(app.UIAxes, 1:Config.MaxGen, Conv, ...
                         'LineWidth', 2, ...
@@ -155,7 +155,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 end
 
-                app.UpdateGUIResults(d, Score, Position, Problem);
+                app.UpdateGUIResults(d, Score, Position, Problem, Feasible);
 
                 cleanupEpanetObject(d);
                 d = [];
@@ -240,7 +240,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         end
 
         % --- Results Updater ---
-        function UpdateGUIResults(app, d, Score, Position, Problem)
+        function UpdateGUIResults(app, d, Score, Position, Problem, Feasible)
             app.BestCost = Score;
             app.OptimalDiameters = Position';
 
@@ -252,7 +252,13 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 Problem.NP, ...
                 app.OptimalDiameters, ...
                 app.PipeVelocities);
-            app.CostSummaryLabel.Text = sprintf('Optimal Cost: $%.2f', app.BestCost);
+            if Feasible
+                app.CostSummaryLabel.Text = ...
+                    sprintf('Cost: $%.2f | Feasible', app.BestCost);
+            else
+                app.CostSummaryLabel.Text = ...
+                    sprintf('Cost: $%.2f | Infeasible', app.BestCost);
+            end
 
             % Tab 2 Updates
             app.UITableNodes.Data = createNodeResultsTable( ...

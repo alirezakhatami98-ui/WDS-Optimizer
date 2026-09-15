@@ -1,20 +1,20 @@
-function [Score, Position, Conv] = runGA(d, Problem, Config)
+function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
 
     NS = Config.NS;
     MaxGen = Config.MaxGen;
 
     Pc = 0.8;
     Pm = 0.03;
-    ND = numel(Problem.D);
 
+    ND = numel(Problem.D);
     NVar = numel(Problem.VariablePipes);
 
     Conv = zeros(MaxGen, 1);
 
     BestCostEver = Inf;
     BestSolEver = [];
-
     BestViolEver = Inf;
+
     BestUnfeasibleSol = [];
     BestUnfeasibleCost = Inf;
 
@@ -27,13 +27,11 @@ function [Score, Position, Conv] = runGA(d, Problem, Config)
         Fitness = calculateFitness(cost, viol);
 
         SelectedIdx = selectionRoulette(Fitness, NS);
-
         MatingPool = Pop(:, SelectedIdx);
 
         NewPop = MatingPool;
 
         for i = 1:2:NS-1
-
             if rand < Pc && NVar > 1
 
                 cp = randi(NVar - 1);
@@ -47,11 +45,9 @@ function [Score, Position, Conv] = runGA(d, Problem, Config)
                      MatingPool(cp+1:end, i)];
 
             end
-
         end
 
         for i = 1:NS
-
             for j = 1:NVar
 
                 if rand < Pm
@@ -59,13 +55,16 @@ function [Score, Position, Conv] = runGA(d, Problem, Config)
                 end
 
             end
-
         end
 
         if ~isempty(BestSolEver)
+
             NewPop(:, 1) = BestSolEver;
+
         elseif ~isempty(BestUnfeasibleSol)
+
             NewPop(:, 1) = BestUnfeasibleSol;
+
         end
 
         Pop = NewPop;
@@ -75,32 +74,49 @@ function [Score, Position, Conv] = runGA(d, Problem, Config)
         feasible_idx = find(feas);
 
         if ~isempty(feasible_idx)
+
             [min_c, k] = min(cost(feasible_idx));
+
             if min_c < BestCostEver
+
                 BestCostEver = min_c;
                 BestSolEver = Pop(:, feasible_idx(k));
+
             end
         end
 
         [min_v, idx_v] = min(viol);
 
         if min_v < BestViolEver
+
             BestViolEver = min_v;
             BestUnfeasibleSol = Pop(:, idx_v);
             BestUnfeasibleCost = cost(idx_v);
+
         end
 
         if ~isempty(BestSolEver)
+
             Conv(G) = BestCostEver;
+
         else
+
             Conv(G) = BestUnfeasibleCost;
+
         end
 
     end
 
     if isempty(BestSolEver)
+
         BestSolEver = BestUnfeasibleSol;
         BestCostEver = BestUnfeasibleCost;
+        Feasible = false;
+
+    else
+
+        Feasible = true;
+
     end
 
     Score = BestCostEver;
