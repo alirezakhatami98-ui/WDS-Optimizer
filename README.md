@@ -71,12 +71,24 @@ The implemented GA currently includes:
 * Mutation
 * Elitist preservation of the best solution
 * Constraint-aware solution evaluation
+* Feasibility-aware final solution selection
 * Convergence tracking
 * Fixed-pipe support
 
 The GA uses constraint-aware fitness evaluation to guide the search toward solutions with lower constraint violation.
 
+The crossover and mutation probabilities are stored in the algorithm `Config` structure as `Config.Pc` and `Config.Pm`.
+
 The final GA solution is selected using feasibility-aware logic: feasible solutions are preferred, and among feasible solutions the solution with the lowest cost is retained. If no feasible solution is found, the best available infeasible solution is returned based on constraint violation.
+
+The current default GA configuration uses:
+
+```text
+Pc = 0.8
+Pm = 0.03
+```
+
+These values are treated as algorithm configuration defaults rather than universal optimal values for all WDS optimization problems.
 
 ## Particle Swarm Optimization (PSO)
 
@@ -417,12 +429,18 @@ The current algorithm configuration contains:
 ```text
 Config.NS
 Config.MaxGen
+Config.Pc
+Config.Pm
 ```
 
 where:
 
 * `NS` is the population/swarm size.
 * `MaxGen` is the maximum number of generations/iterations.
+* `Pc` is the GA crossover probability.
+* `Pm` is the GA mutation probability.
+
+The GA-specific parameters `Pc` and `Pm` are currently maintained as internal algorithm configuration values and are not exposed as GUI controls.
 
 The algorithm configuration is constructed by:
 
@@ -1140,18 +1158,43 @@ The final Phase 5 implementation uses dimensionless normalized constraint violat
 
 ## Phase 6 — Genetic Algorithm Improvement
 
-**Status: Planned**
+**Status: Completed**
 
-The GA implementation will be reviewed for:
+Phase 6 reviewed the existing Genetic Algorithm implementation and validated its main search components and execution behavior.
 
-* Elitism
-* Selection
-* Crossover
-* Mutation
-* Infeasible-solution handling
-* Stopping criteria
-* Best feasible solution
-* Convergence tracking
+Completed activities include:
+
+* Establishment of a GA baseline and experimental protocol
+* Review of discrete population initialization
+* Validation of variable-pipe handling during population initialization
+* Validation of roulette-wheel selection
+* Statistical verification of selection probability behavior
+* Review of single-point crossover
+* Review of mutation
+* Statistical verification of crossover and mutation probabilities
+* Review of elitist preservation
+* Review of feasibility-aware solution handling
+* Review of convergence tracking
+* Separation of GA crossover and mutation parameters into the `Config` structure
+* Definition of internal default values for `Pc` and `Pm`
+* Multiple independent GA regression runs
+* GA regression against PSO
+* Verification of GA output consistency
+
+The final Phase 6 implementation preserves the existing GA search mechanisms because the review and statistical tests confirmed that the initialization, selection, crossover, mutation, elitism, and feasibility-aware handling are structurally consistent with the current discrete optimization representation.
+
+No additional GA tuning or GUI controls were introduced during this phase.
+
+The current GA configuration uses:
+
+```text
+Config.NS
+Config.MaxGen
+Config.Pc = 0.8
+Config.Pm = 0.03
+```
+
+The GA remains stochastic, so repeated executions may produce different feasible costs. Multiple independent regression runs on the Two-Loop network produced feasible solutions, and GA/PSO regression testing confirmed that the Phase 6 changes did not introduce a regression in the PSO workflow.
 
 ---
 
@@ -1268,12 +1311,14 @@ Final documentation and release preparation will be performed after the architec
 
 **Phase 5:** Completed
 
-**Current next phase:** Phase 6 — Genetic Algorithm Improvement
+**Phase 6:** Completed
 
-The repository has completed its initial architecture refactoring, input validation/configuration layer, temporary-file and EPANET lifecycle management, unified optimization problem representation, and constraint-handling refinement.
+**Current next phase:** Phase 7 — Discrete PSO Improvement
 
-Phase 5 established normalized hydraulic constraint violations, centralized constraint evaluation, feasibility-aware handling for GA and PSO, and explicit final feasibility reporting in the GUI.
+The repository has completed its initial architecture refactoring, input validation/configuration layer, temporary-file and EPANET lifecycle management, unified optimization problem representation, constraint-handling refinement, and Genetic Algorithm review.
 
-The optimization functionality has been regression-tested after the Phase 5 changes, including synthetic constraint tests and GA/PSO executions on the Two-Loop network.
+Phase 6 validated the existing GA search components, including population initialization, selection, crossover, mutation, elitism, feasibility-aware handling, and convergence tracking. The GA crossover and mutation parameters were moved into the algorithm `Config` structure while preserving the existing search behavior.
+
+The optimization functionality has been regression-tested after the Phase 6 changes, including multiple independent GA executions, GA/PSO regression testing, and verification of GA output consistency.
 
 The project will continue through the remaining development phases incrementally, with functional testing performed after each major change.
