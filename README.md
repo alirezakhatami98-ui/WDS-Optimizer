@@ -77,7 +77,7 @@ The implemented GA currently includes:
 
 The GA uses constraint-aware fitness evaluation to guide the search toward solutions with lower constraint violation.
 
-The crossover and mutation probabilities are stored in the algorithm `Config` structure as `Config.Pc` and `Config.Pm`.
+The crossover and mutation probabilities are stored in the algorithm `Config` structure as `Config.GA.Pc` and `Config.GA.Pm`.
 
 The final GA solution is selected using feasibility-aware logic: feasible solutions are preferred, and among feasible solutions the solution with the lowest cost is retained. If no feasible solution is found, the best available infeasible solution is returned based on constraint violation.
 
@@ -103,6 +103,20 @@ The implemented PSO currently includes:
 * Fixed-pipe support
 
 For PSO, Personal Best and Global Best updates use the same feasibility-aware policy. Feasible solutions are preferred over infeasible solutions; among feasible solutions lower cost is preferred, while among infeasible solutions lower constraint violation is preferred.
+
+The PSO operates on discrete pipe-diameter decisions represented by integer diameter indices. Particle positions and velocities are maintained internally as continuous search states, while evaluated positions are converted to valid discrete diameter indices using rounding and boundary clamping.
+
+This approach was reviewed through synthetic discretization, boundary, velocity, repeated-index, and fixed-pipe tests. The existing mechanism was retained because the validation did not identify a structural need for a more complex discrete PSO mechanism.
+
+The PSO parameters are maintained in the `Config.PSO` structure:
+
+```text
+Config.PSO.w = 0.7
+Config.PSO.c1 = 1.5
+Config.PSO.c2 = 1.5
+```
+
+These values are internal algorithm configuration defaults and are not exposed as GUI controls.
 
 Both algorithms use the same centralized hydraulic constraint semantics through the common optimization evaluation framework.
 
@@ -429,18 +443,26 @@ The current algorithm configuration contains:
 ```text
 Config.NS
 Config.MaxGen
-Config.Pc
-Config.Pm
+
+Config.GA.Pc
+Config.GA.Pm
+
+Config.PSO.w
+Config.PSO.c1
+Config.PSO.c2
 ```
 
 where:
 
 * `NS` is the population/swarm size.
 * `MaxGen` is the maximum number of generations/iterations.
-* `Pc` is the GA crossover probability.
-* `Pm` is the GA mutation probability.
+* `Config.GA.Pc` is the GA crossover probability.
+* `Config.GA.Pm` is the GA mutation probability.
+* `Config.PSO.w` is the PSO inertia weight.
+* `Config.PSO.c1` is the PSO cognitive coefficient.
+* `Config.PSO.c2` is the PSO social coefficient.
 
-The GA-specific parameters `Pc` and `Pm` are currently maintained as internal algorithm configuration values and are not exposed as GUI controls.
+The GA-specific parameters `Pc` and `Pm`, as well as the PSO parameters `w`, `c1`, and `c2`, are maintained as internal algorithm configuration values and are not exposed as GUI controls.
 
 The algorithm configuration is constructed by:
 
@@ -450,7 +472,7 @@ algorithms/buildAlgorithmConfig.m
 
 This separation ensures that engineering problem data and algorithm execution settings are not mixed together.
 
-The `Problem` structure is shared by GA and PSO, while each algorithm remains responsible for its own search mechanism.
+The `Problem` structure is shared by GA and PSO, while algorithm-specific search parameters are grouped under their respective configuration sections.
 
 ---
 
@@ -1200,9 +1222,37 @@ The GA remains stochastic, so repeated executions may produce different feasible
 
 ## Phase 7 — Discrete PSO Improvement
 
-**Status: Planned**
+**Status: Completed**
 
-The suitability of the current PSO implementation for discrete pipe-diameter optimization will be scientifically evaluated.
+Phase 7 evaluated the existing PSO implementation for discrete pipe-diameter optimization.
+
+Completed activities include:
+
+* Analysis of the existing PSO position and velocity representation
+* Review of discrete diameter-index handling
+* Validation of rounding and boundary clamping behavior
+* Synthetic testing of small and large velocity effects
+* Testing of repeated discrete diameter indices
+* Review and validation of Personal Best and Global Best ranking
+* Identification and correction of a feasibility-aware ranking issue
+* Validation that feasible solutions dominate infeasible solutions
+* Validation of lower-cost preference among feasible solutions
+* Validation of lower-violation preference among infeasible solutions
+* Separation of PSO parameters into the `Config.PSO` structure
+* Fixed-pipe regression testing
+* Multiple independent PSO regression runs on the Two-Loop network
+* Final GA and PSO regression testing
+* Verification of PSO output consistency and convergence reporting
+
+The existing PSO discrete evaluation mechanism was retained because the validation did not identify a structural need for a more complex discrete PSO mechanism.
+
+The corrected feasibility-aware ranking policy is:
+
+1. Feasible solutions are preferred over infeasible solutions.
+2. Among feasible solutions, lower cost is preferred.
+3. Among infeasible solutions, lower constraint violation is preferred.
+
+The Phase 7 changes preserve the existing `Problem` representation, constraint semantics, GUI workflow, and PSO interface while improving the correctness and organization of the algorithm implementation.
 
 ---
 
@@ -1313,12 +1363,14 @@ Final documentation and release preparation will be performed after the architec
 
 **Phase 6:** Completed
 
-**Current next phase:** Phase 7 — Discrete PSO Improvement
+**Phase 7:** Completed
 
-The repository has completed its initial architecture refactoring, input validation/configuration layer, temporary-file and EPANET lifecycle management, unified optimization problem representation, constraint-handling refinement, and Genetic Algorithm review.
+**Current next phase:** Phase 8 — Performance Optimization
 
-Phase 6 validated the existing GA search components, including population initialization, selection, crossover, mutation, elitism, feasibility-aware handling, and convergence tracking. The GA crossover and mutation parameters were moved into the algorithm `Config` structure while preserving the existing search behavior.
+The repository has completed its initial architecture refactoring, input validation/configuration layer, temporary-file and EPANET lifecycle management, unified optimization problem representation, constraint-handling refinement, Genetic Algorithm review, and Particle Swarm Optimization review.
 
-The optimization functionality has been regression-tested after the Phase 6 changes, including multiple independent GA executions, GA/PSO regression testing, and verification of GA output consistency.
+Phase 7 evaluated the existing PSO implementation for discrete pipe-diameter optimization. The existing discrete evaluation mechanism was retained after synthetic and regression testing, while a feasibility-aware ranking issue was identified and corrected. PSO-specific parameters were also organized under `Config.PSO`, while GA-specific parameters are maintained under `Config.GA`.
+
+The optimization functionality has been regression-tested after the Phase 7 changes, including multiple independent PSO executions, fixed-pipe regression, final GA/PSO regression testing, and verification of PSO output consistency.
 
 The project will continue through the remaining development phases incrementally, with functional testing performed after each major change.

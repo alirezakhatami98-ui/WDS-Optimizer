@@ -3,7 +3,11 @@ function Config = buildAlgorithmConfig(NS, MaxGen)
     Config.NS = NS;
     Config.MaxGen = MaxGen;
 
-    Config.Pc = 0.8;
-    Config.Pm = 0.03;
+    Config.GA.Pc = 0.8;
+    Config.GA.Pm = 0.03;
+
+    Config.PSO.w = 0.7;
+    Config.PSO.c1 = 1.5;
+    Config.PSO.c2 = 1.5;
 
 end

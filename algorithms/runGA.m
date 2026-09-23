@@ -3,8 +3,8 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
     NS = Config.NS;
     MaxGen = Config.MaxGen;
 
-    Pc = Config.Pc;
-    Pm = Config.Pm;
+    Pc = Config.GA.Pc;
+    Pm = Config.GA.Pm;
 
     ND = numel(Problem.D);
     NVar = numel(Problem.VariablePipes);
