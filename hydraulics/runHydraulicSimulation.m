@@ -1,11 +1,12 @@
-function [Pj, Vpipes] = runHydraulicSimulation(d, NP, FullD)
+function [Pj, Vpipes] = runHydraulicSimulation( ...
+    d, NP, FullD, JunctionIndices)
 
     d.setLinkDiameter(1:NP, FullD');
     d.solveCompleteHydraulics();
 
-    P = d.getNodePressure();
-    Pj = P(strcmpi(d.getNodeType(), 'JUNCTION'));
+    P = double(d.getNodePressure());
+    Pj = P(JunctionIndices);
 
-    Vpipes = abs(d.getLinkVelocity());
+    Vpipes = double(abs(d.getLinkVelocity()));
 
 end

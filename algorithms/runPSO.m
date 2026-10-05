@@ -16,6 +16,8 @@ function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
     PBestCost = Inf(1, N);
     PBestViol = Inf(1, N);
 
+    Cache = createEvaluationCache();
+
     GBestX = [];
     GBestCost = Inf;
     GBestViol = Inf;
@@ -27,7 +29,9 @@ function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
         X_discrete = round(X);
         X_discrete = max(1, min(ND, X_discrete));
 
-        [cost, viol, feas] = evaluatePopulation(X_discrete, Problem, d);
+        [cost, viol, feas, Cache] = ...
+            evaluatePopulation( ...
+                X_discrete, Problem, d, Cache, Config.Parallel);
 
         for i = 1:N
 

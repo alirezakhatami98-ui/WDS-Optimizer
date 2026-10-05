@@ -26,6 +26,8 @@ The toolkit combines:
 * Hydraulic result visualization
 * Excel result export
 * Structured input and configuration validation
+* Evaluation caching
+* Optional parallel hydraulic evaluation
 
 The application allows users to load an EPANET network together with available pipe diameter and cost data, configure hydraulic and optimization parameters, select an optimization algorithm, and evaluate optimized pipe-diameter configurations subject to hydraulic constraints.
 
@@ -55,6 +57,10 @@ The dependency is stored under:
 dependencies/EPANET-Matlab-Toolkit-2.3.5.2/
 ```
 
+The hydraulic evaluation layer reuses the initialized EPANET object during sequential optimization evaluation rather than creating a new EPANET object for every candidate solution.
+
+When optional parallel evaluation is enabled, each MATLAB worker maintains its own EPANET object for the duration of the optimization evaluation session.
+
 ---
 
 # Optimization Algorithms
@@ -74,6 +80,8 @@ The implemented GA currently includes:
 * Feasibility-aware final solution selection
 * Convergence tracking
 * Fixed-pipe support
+* Evaluation caching
+* Optional parallel hydraulic evaluation
 
 The GA uses constraint-aware fitness evaluation to guide the search toward solutions with lower constraint violation.
 
@@ -101,6 +109,8 @@ The implemented PSO currently includes:
 * Constraint-aware solution evaluation
 * Convergence tracking
 * Fixed-pipe support
+* Evaluation caching
+* Optional parallel hydraulic evaluation
 
 For PSO, Personal Best and Global Best updates use the same feasibility-aware policy. Feasible solutions are preferred over infeasible solutions; among feasible solutions lower cost is preferred, while among infeasible solutions lower constraint violation is preferred.
 
@@ -169,7 +179,10 @@ Problem.FixedPipes
 Problem.VariablePipes
 Problem.Pmin
 Problem.Vmax
+Problem.JunctionIndices
 ```
+
+`Problem.JunctionIndices` contains the static indices of EPANET junction nodes used for pressure evaluation.
 
 The `Problem` structure contains problem-specific data and constraints, while algorithm execution settings are kept separate in the `Config` structure.
 
@@ -450,6 +463,9 @@ Config.GA.Pm
 Config.PSO.w
 Config.PSO.c1
 Config.PSO.c2
+
+Config.Parallel.Enabled
+Config.Parallel.NumWorkers
 ```
 
 where:
@@ -461,8 +477,19 @@ where:
 * `Config.PSO.w` is the PSO inertia weight.
 * `Config.PSO.c1` is the PSO cognitive coefficient.
 * `Config.PSO.c2` is the PSO social coefficient.
+* `Config.Parallel.Enabled` controls whether optional parallel hydraulic evaluation is used.
+* `Config.Parallel.NumWorkers` specifies the requested MATLAB worker count when parallel evaluation is enabled.
 
 The GA-specific parameters `Pc` and `Pm`, as well as the PSO parameters `w`, `c1`, and `c2`, are maintained as internal algorithm configuration values and are not exposed as GUI controls.
+
+Parallel execution is also not exposed as a GUI control. It is an internal configuration capability and is disabled by default:
+
+```text
+Config.Parallel.Enabled = false
+Config.Parallel.NumWorkers = 2
+```
+
+The default sequential execution path therefore remains unchanged for normal application use.
 
 The algorithm configuration is constructed by:
 
@@ -614,6 +641,7 @@ WDS-Optimizer/
 │   ├── calculateCost.m
 │   ├── calculateFitness.m
 │   ├── checkConstraints.m
+│   ├── createEvaluationCache.m
 │   ├── evaluatePopulation.m
 │   └── evaluateSolution.m
 │
@@ -625,6 +653,12 @@ WDS-Optimizer/
 │   ├── initializeNetwork.m
 │   ├── runHydraulicSimulation.m
 │   └── UpdateInpHeadlossFormula.m
+│
+├── parallel/
+│   ├── cleanupParallelHydraulics.m
+│   ├── evaluateParallelHydraulics.m
+│   ├── initializeParallelHydraulics.m
+│   └── workerEpanetBatchEvaluate.m
 │
 ├── data/
 │   └── loadOptimizationData.m
@@ -656,13 +690,284 @@ The `validation` directory contains the input and configuration validation layer
 
 The `optimization` directory contains the centralized optimization problem representation and the optimization evaluation functions.
 
+The `createEvaluationCache.m` utility provides the evaluation-level cache used to avoid repeated hydraulic evaluation of identical candidate chromosomes during an optimization run.
+
 The `algorithms` directory contains the optimization algorithms and algorithm configuration construction.
+
+The `parallel` directory contains the optional parallel hydraulic evaluation layer. It manages worker-side EPANET initialization, batch hydraulic evaluation, and worker-side EPANET cleanup.
+
+The `hydraulics` directory contains the sequential EPANET hydraulic evaluation and lifecycle management functions.
 
 The `utils` directory contains general-purpose result and export utilities.
 
 The previous `results` directory was reorganized into `utils` during the repository architecture refactoring.
 
 The previous `buildOptimizationParams.m` configuration builder was removed during Phase 4. Its responsibilities were separated into the unified `Problem` representation and the algorithm `Config` structure.
+
+---
+
+# Evaluation Cache
+
+The optimization evaluation layer uses a cache to avoid repeating hydraulic simulations for candidate chromosomes that have already been evaluated during the current optimization run.
+
+The cache is created once per optimization execution and is shared by the evaluation calls made by the selected algorithm.
+
+The cache is implemented using:
+
+```text
+optimization/createEvaluationCache.m
+```
+
+The cache uses candidate chromosomes as keys and stores the corresponding evaluation results:
+
+```text
+[cost, violation, feasibility]
+```
+
+The evaluation flow is conceptually:
+
+```text
+Candidate Chromosome
+        │
+        ▼
+   Cache Lookup
+        │
+   ┌────┴────┐
+   │         │
+  HIT       MISS
+   │         │
+   │         ▼
+   │    Hydraulic Evaluation
+   │         │
+   │         ▼
+   │    Cost / Constraint
+   │      Evaluation
+   │         │
+   └────┬────┘
+        ▼
+ [cost, violation, feasibility]
+```
+
+Cache entries are valid only for the lifetime of the current optimization execution.
+
+The cache is maintained in the main MATLAB process and is not shared directly between parallel workers.
+
+The cache is an exact evaluation reuse mechanism. It does not approximate hydraulic results and does not change the optimization objective or constraint definitions.
+
+The effectiveness of caching depends on how frequently the optimization algorithm generates duplicate candidate chromosomes.
+
+During Phase 8 measurements, duplicate evaluations were observed in both algorithms, with particularly high repetition in PSO. Therefore, caching was retained as part of the production evaluation architecture.
+
+---
+
+# Parallel Hydraulic Evaluation
+
+The toolkit supports an optional parallel hydraulic evaluation path for optimization workloads where parallel execution provides a measurable benefit.
+
+The parallel implementation was introduced and validated during Phase 8 after analyzing EPANET and MATLAB compatibility.
+
+## EPANET Worker Architecture
+
+The EPANET-MATLAB Toolkit uses a handle-based EPANET object. Sharing the same EPANET object between MATLAB workers is therefore not used.
+
+Instead, when parallel evaluation is enabled:
+
+* A MATLAB parallel pool is created or reused.
+* Each worker initializes its own EPANET object.
+* The worker reuses its EPANET object across multiple candidate evaluations.
+* Workers evaluate assigned candidate batches.
+* Workers return only hydraulic outputs.
+* The main MATLAB process calculates cost, constraint violation, and feasibility.
+* Worker EPANET objects are explicitly unloaded after the optimization evaluation is complete.
+
+The architecture is:
+
+```text
+runGA / runPSO
+        │
+        ▼
+evaluatePopulation
+        │
+        ├── Cache HIT
+        │      └── Reuse [cost, violation, feasibility]
+        │
+        └── Cache MISS
+               │
+               ▼
+       Hydraulic Evaluation
+          ┌────┴────┐
+          │         │
+     Sequential   Parallel
+          │         │
+       Main EPANET  Worker EPANET
+                    │
+             ┌──────┼──────┐
+             ▼      ▼      ▼
+          Worker  Worker  Worker
+             │      │      │
+             └──────┼──────┘
+                    ▼
+              Pj / Vpipes
+                    │
+                    ▼
+           Main-process cost /
+           constraint evaluation
+                    │
+                    ▼
+                  Cache
+```
+
+The main-process cache is intentionally kept separate from the worker EPANET state.
+
+## Parallel Configuration
+
+Parallel execution is controlled by:
+
+```text
+Config.Parallel.Enabled
+Config.Parallel.NumWorkers
+```
+
+The default configuration is:
+
+```text
+Config.Parallel.Enabled = false
+Config.Parallel.NumWorkers = 2
+```
+
+This means that the standard application workflow remains sequential unless parallel execution is explicitly enabled in the configuration.
+
+Parallel execution is not exposed as a GUI control.
+
+## Parallel Lifecycle
+
+The parallel hydraulic layer provides:
+
+```text
+parallel/initializeParallelHydraulics.m
+parallel/evaluateParallelHydraulics.m
+parallel/cleanupParallelHydraulics.m
+parallel/workerEpanetBatchEvaluate.m
+```
+
+The lifecycle is:
+
+```text
+Initialize MATLAB Pool
+        │
+        ▼
+Initialize EPANET on Each Worker
+        │
+        ▼
+Evaluate Multiple Candidate Batches
+        │
+        ▼
+Return Hydraulic Results
+        │
+        ▼
+Unload EPANET on Workers
+```
+
+The MATLAB parallel pool itself is not automatically deleted during optimization cleanup. The cleanup routine unloads the worker-side EPANET objects while allowing the MATLAB session-level pool to remain available for reuse.
+
+If an existing pool already has the requested number of workers, it can be reused.
+
+If an existing pool has a different worker count, the parallel initialization layer recreates the pool with the requested worker count.
+
+---
+
+# Phase 8 Performance Findings
+
+Phase 8 followed a measurement-driven approach:
+
+```text
+Measure
+   ↓
+Identify Bottleneck
+   ↓
+Understand Cause
+   ↓
+Evaluate Improvement
+   ↓
+Implement Only if Justified
+   ↓
+Regression Test
+   ↓
+Measure Again
+```
+
+The analysis showed that hydraulic simulation dominates optimization execution time.
+
+A representative non-hydraulic benchmark showed that full-diameter construction, cost calculation, and constraint calculation together accounted for only a very small fraction of evaluation time compared with EPANET hydraulic simulation.
+
+A hydraulic evaluation breakdown showed that the dominant component was:
+
+```text
+EPANET solveCompleteHydraulics
+```
+
+while diameter assignment and result extraction represented smaller portions of the hydraulic evaluation cost.
+
+Therefore, Phase 8 did not attempt unnecessary optimization of already inexpensive non-hydraulic operations.
+
+## Static Junction Indexing
+
+Junction indices are now identified once during network preparation:
+
+```text
+Problem.JunctionIndices
+```
+
+The hydraulic evaluation then directly extracts the required junction pressures using these precomputed indices.
+
+This avoids repeated node-type queries during every candidate evaluation.
+
+## Evaluation Caching
+
+Repeated candidate chromosomes were measured during both GA and PSO execution.
+
+Representative measurements showed:
+
+* GA duplicate evaluation rate: approximately 80.68% in the measured run.
+* PSO duplicate evaluation rate: approximately 98.20% in the measured run.
+
+These results justified introducing exact evaluation caching into the optimization evaluation layer.
+
+The cache avoids repeating hydraulic simulations for candidates already evaluated during the current optimization run.
+
+## Parallel Performance
+
+Parallel hydraulic evaluation was evaluated only after confirming that independent worker-local EPANET objects could operate correctly.
+
+The validated architecture produced exact hydraulic equivalence in the tested workloads, with zero observed pressure or velocity discrepancies between sequential and parallel evaluation.
+
+Representative final performance measurements on the Two-Loop benchmark were:
+
+| Algorithm | Sequential | Parallel | Speedup | Time Reduction |
+| --------- | ---------: | -------: | ------: | -------------: |
+| GA        |   205.86 s | 134.73 s |   1.53× |         34.56% |
+| PSO       |    40.54 s |  33.36 s |   1.22× |         17.72% |
+
+These measurements demonstrate that parallel evaluation can provide a meaningful performance improvement for sufficiently expensive workloads.
+
+However, parallel execution is **not universally faster**.
+
+Synthetic and intermediate tests showed that:
+
+* Parallel worker startup and coordination introduce overhead.
+* Small workloads may be slower when executed in parallel.
+* Workloads with very high cache-hit rates may provide little work for parallel workers.
+* GA and PSO can exhibit different levels of parallel benefit because their candidate-generation and repetition patterns differ.
+
+Therefore, the production configuration keeps:
+
+```text
+Config.Parallel.Enabled = false
+```
+
+by default.
+
+Parallel evaluation is considered an optional performance capability rather than a mandatory replacement for sequential evaluation.
 
 ---
 
@@ -866,13 +1171,19 @@ Initialize EPANET Network
 Validate Fixed Pipes
     │
     ▼
-Build Optimization Parameters
+Build Optimization Problem
     │
     ▼
 Network/Data Consistency Validation
     │
     ▼
+Initialize Optional Parallel Workers
+    │
+    ▼
 Run GA / PSO
+    │
+    ▼
+Evaluation Cache
     │
     ▼
 Hydraulic Evaluation
@@ -880,6 +1191,10 @@ Hydraulic Evaluation
     ▼
 Display Results
 ```
+
+When parallel execution is disabled, the optimization uses the standard sequential EPANET evaluation path.
+
+When parallel execution is enabled, worker-local EPANET objects are initialized before optimization evaluation and unloaded during optimization cleanup.
 
 Validation errors generated during the optimization workflow are propagated to the GUI execution layer and displayed to the user through an error dialog.
 
@@ -923,18 +1238,19 @@ hydraulics/cleanupTempInpFiles.m
 
 The cleanup routine safely checks for generated files before attempting deletion and ignores cleanup errors so that secondary cleanup failures do not mask the original execution error.
 
-
 ---
 
 # EPANET Object Lifecycle
 
 EPANET network objects are explicitly managed during the optimization workflow.
 
-The EPANET object is created during network initialization and is unloaded after it is no longer required.
+The main EPANET object is created during network initialization and is unloaded after it is no longer required.
+
+When optional parallel evaluation is enabled, additional independent EPANET objects are created on the MATLAB workers. These worker-side objects are also explicitly unloaded.
 
 The lifecycle is designed to cover both normal and exceptional execution paths.
 
-The main lifecycle components are:
+## Main EPANET Lifecycle
 
 ```text
 Create Temporary INP
@@ -962,7 +1278,38 @@ The network initialization routine also protects against initialization failures
 
 This prevents EPANET objects from remaining loaded after failed initialization.
 
-The main application workflow also performs EPANET cleanup in both successful and failed optimization paths.
+## Parallel EPANET Lifecycle
+
+When parallel execution is enabled:
+
+```text
+Initialize MATLAB Pool
+        │
+        ▼
+Initialize One EPANET Object per Worker
+        │
+        ▼
+Evaluate Candidate Batches
+        │
+        ▼
+Unload Worker EPANET Objects
+        │
+        ▼
+Keep MATLAB Pool Available for Session Reuse
+```
+
+The worker-side lifecycle is managed through:
+
+```text
+parallel/initializeParallelHydraulics.m
+parallel/evaluateParallelHydraulics.m
+parallel/cleanupParallelHydraulics.m
+parallel/workerEpanetBatchEvaluate.m
+```
+
+The parallel cleanup routine unloads worker EPANET objects but does not automatically delete the MATLAB parallel pool.
+
+The main application workflow performs EPANET cleanup in both successful and failed optimization paths.
 
 ---
 
@@ -987,20 +1334,16 @@ GUI
             GA / PSO
                 │
                 ▼
-            Optimization
+        Optimization Evaluation
                 │
-                ├── Objective Evaluation
+                ├── Evaluation Cache
                 │
-                └── Constraint Evaluation
+                ├── Sequential Hydraulic Evaluation
+                │
+                └── Optional Parallel Hydraulic Evaluation
                         │
                         ▼
-                checkConstraints.m
-                        │
-                        ▼
-                    Hydraulics
-                        │
-                        ▼
-                      EPANET
+                     EPANET
 ```
 
 The main architectural responsibilities are:
@@ -1010,13 +1353,18 @@ The main architectural responsibilities are:
 * **Problem Construction** — creation of the unified engineering optimization problem.
 * **Algorithm Configuration** — construction of algorithm execution settings.
 * **Algorithms** — GA and PSO search mechanisms.
-* **Optimization** — candidate-solution evaluation, objective calculation, and constraint evaluation.
-* **Hydraulics** — EPANET-based hydraulic simulation.
+* **Optimization** — candidate-solution evaluation, objective calculation, constraint evaluation, and caching.
+* **Hydraulics** — sequential EPANET-based hydraulic simulation and lifecycle management.
+* **Parallel** — optional worker-based hydraulic evaluation.
 * **EPANET** — hydraulic computation engine.
 
 The `Problem` structure contains the engineering optimization problem and is shared by GA and PSO.
 
 The `Config` structure contains algorithm execution settings and is passed separately to the selected optimization algorithm.
+
+The evaluation cache belongs to the optimization evaluation layer rather than to GA or PSO specifically.
+
+The parallel layer is also kept separate from the core algorithm implementations. GA and PSO only provide the evaluation configuration to the common `evaluatePopulation` workflow.
 
 This architecture is intended to improve:
 
@@ -1029,6 +1377,8 @@ This architecture is intended to improve:
 The validation layer introduced in Phase 2 provides an explicit boundary between user-provided configuration and the computational optimization pipeline.
 
 Phase 4 further separates the definition of the optimization problem from the algorithm-specific search configuration.
+
+Phase 8 further separates performance-related evaluation mechanisms from the algorithm search logic by introducing caching and optional worker-based hydraulic evaluation.
 
 Constraint evaluation is centralized in:
 
@@ -1112,7 +1462,6 @@ Completed activities include:
 
 The Phase 3 implementation preserves the original user-provided EPANET input file and confines generated runtime artifacts to the system temporary directory.
 
-
 ---
 
 ## Phase 4 — Unified Optimization Problem
@@ -1155,23 +1504,14 @@ Phase 5 reviewed and refined the constraint evaluation, feasibility handling, an
 Completed activities include:
 
 * Analysis of the existing constraint-handling workflow
-
 * Definition of normalized pressure and velocity constraint violations
-
 * Centralized constraint evaluation
-
 * Explicit feasibility determination
-
 * Review of GA penalty-based fitness handling
-
 * Review of PSO feasibility-aware Personal Best and Global Best ranking
-
 * Unification of hydraulic constraint semantics between GA and PSO
-
 * Propagation of final solution feasibility status to the GUI
-
 * Synthetic constraint regression testing
-
 * GA and PSO regression testing on the Two-Loop network
 
 The final Phase 5 implementation uses dimensionless normalized constraint violations and a common feasibility definition across the optimization framework.
@@ -1212,8 +1552,8 @@ The current GA configuration uses:
 ```text
 Config.NS
 Config.MaxGen
-Config.Pc = 0.8
-Config.Pm = 0.03
+Config.GA.Pc = 0.8
+Config.GA.Pm = 0.03
 ```
 
 The GA remains stochastic, so repeated executions may produce different feasible costs. Multiple independent regression runs on the Two-Loop network produced feasible solutions, and GA/PSO regression testing confirmed that the Phase 6 changes did not introduce a regression in the PSO workflow.
@@ -1258,18 +1598,146 @@ The Phase 7 changes preserve the existing `Problem` representation, constraint s
 
 ## Phase 8 — Performance Optimization
 
-**Status: Planned**
+**Status: Completed**
 
-Potential improvements include:
+Phase 8 reviewed the optimization evaluation pipeline with a measurement-driven approach.
 
-* Hydraulic evaluation overhead
-* Repeated simulations
-* Caching
-* EPANET object management
-* Evaluation performance
-* Possible parallel evaluation
+The guiding process was:
 
-Parallel execution will only be considered after compatibility with EPANET and MATLAB has been evaluated.
+```text
+Measure
+   ↓
+Identify Bottleneck
+   ↓
+Understand Cause
+   ↓
+Evaluate Possible Improvement
+   ↓
+Implement Only if Justified
+   ↓
+Regression Test
+   ↓
+Measure Again
+```
+
+Completed activities include:
+
+* Establishment of a performance baseline
+* Analysis of hydraulic evaluation overhead
+* Identification of repeated candidate evaluations
+* Measurement of duplicate candidate rates
+* Introduction of exact evaluation caching
+* Measurement and selection of cache lookup strategy
+* Static caching of junction indices
+* Analysis of EPANET object lifecycle during evaluation
+* Measurement of non-hydraulic evaluation overhead
+* Measurement of hydraulic evaluation components
+* Analysis of variable-pipe versus full-pipe diameter assignment
+* Analysis of the feasibility of hydraulic-result reuse
+* Analysis of EPANET compatibility with MATLAB parallel workers
+* Prototype testing of persistent worker-local EPANET objects
+* Implementation of optional parallel hydraulic evaluation
+* Integration of parallel evaluation into the common `evaluatePopulation` workflow
+* Worker-side EPANET lifecycle management
+* Sequential and parallel numerical-equivalence testing
+* GA parallel regression testing
+* PSO parallel regression testing
+* Existing-pool reuse testing
+* No-pool sequential regression testing
+* GUI regression testing with sequential execution
+* GUI regression testing with parallel execution
+* Final performance validation
+* Removal of temporary performance instrumentation and benchmark artifacts
+
+### Evaluation Cache
+
+The Phase 8 analysis identified substantial repetition in candidate evaluations.
+
+Representative measured duplicate rates included:
+
+```text
+GA: approximately 80.68%
+PSO: approximately 98.20%
+```
+
+The exact evaluation cache was therefore integrated into the common evaluation layer.
+
+The cache stores:
+
+```text
+[cost, violation, feasibility]
+```
+
+for previously evaluated candidate chromosomes.
+
+Caching does not alter the objective function, constraint semantics, or optimization algorithms. It only avoids repeating an already completed exact evaluation.
+
+### Static Hydraulic Data
+
+The junction indices required for pressure evaluation are now identified once during network preparation and stored in:
+
+```text
+Problem.JunctionIndices
+```
+
+This avoids repeated node-type queries during candidate evaluation.
+
+### Hydraulic Bottleneck
+
+Phase 8 measurements showed that hydraulic simulation dominates evaluation cost.
+
+Non-hydraulic operations such as full-diameter construction, cost calculation, and constraint calculation represented only a small fraction of total evaluation time compared with EPANET hydraulic simulation.
+
+Hydraulic measurements further showed that:
+
+```text
+solveCompleteHydraulics
+```
+
+is the dominant component of the hydraulic evaluation.
+
+Therefore, Phase 8 did not introduce unnecessary optimization of already inexpensive non-hydraulic calculations.
+
+### Parallel Hydraulic Evaluation
+
+EPANET compatibility with MATLAB workers was evaluated before implementation.
+
+The final implementation uses independent worker-local EPANET objects rather than attempting to share one EPANET object across workers.
+
+The implementation was integrated into the common evaluation layer and validated with sequential/parallel equivalence tests.
+
+Representative final performance measurements on the Two-Loop benchmark were:
+
+| Algorithm | Sequential | Parallel | Speedup | Time Reduction |
+| --------- | ---------: | -------: | ------: | -------------: |
+| GA        |   205.86 s | 134.73 s |   1.53× |         34.56% |
+| PSO       |    40.54 s |  33.36 s |   1.22× |         17.72% |
+
+These results justify retaining parallel evaluation as an optional capability.
+
+However, the tests also demonstrated that parallel execution is not universally faster. Small workloads and workloads with high cache-hit rates can suffer from parallel coordination overhead.
+
+Therefore:
+
+```text
+Config.Parallel.Enabled = false
+```
+
+remains the production default.
+
+Parallel execution is an optional performance capability and is not exposed through the GUI.
+
+Phase 8 did not modify:
+
+* GA search logic
+* PSO search logic
+* Constraint semantics
+* GA penalty coefficient
+* PSO ranking policy
+* GUI behavior
+* Objective definition
+
+The purpose of Phase 8 was performance improvement at the evaluation layer while preserving the existing optimization behavior.
 
 ---
 
@@ -1365,12 +1833,31 @@ Final documentation and release preparation will be performed after the architec
 
 **Phase 7:** Completed
 
-**Current next phase:** Phase 8 — Performance Optimization
+**Phase 8:** Completed
 
-The repository has completed its initial architecture refactoring, input validation/configuration layer, temporary-file and EPANET lifecycle management, unified optimization problem representation, constraint-handling refinement, Genetic Algorithm review, and Particle Swarm Optimization review.
+**Current next phase:** Phase 9 — Reproducibility
 
-Phase 7 evaluated the existing PSO implementation for discrete pipe-diameter optimization. The existing discrete evaluation mechanism was retained after synthetic and regression testing, while a feasibility-aware ranking issue was identified and corrected. PSO-specific parameters were also organized under `Config.PSO`, while GA-specific parameters are maintained under `Config.GA`.
+The repository has completed its initial architecture refactoring, input validation/configuration layer, temporary-file and EPANET lifecycle management, unified optimization problem representation, constraint-handling refinement, Genetic Algorithm review, Particle Swarm Optimization review, and performance optimization.
 
-The optimization functionality has been regression-tested after the Phase 7 changes, including multiple independent PSO executions, fixed-pipe regression, final GA/PSO regression testing, and verification of PSO output consistency.
+Phase 8 analyzed the optimization evaluation pipeline using measured performance data rather than speculative optimization.
+
+The analysis identified hydraulic simulation as the dominant execution cost and showed substantial repetition of candidate evaluations. An exact evaluation cache was therefore introduced into the common evaluation layer.
+
+Static junction indexing was also introduced to avoid repeated network metadata queries during hydraulic evaluation.
+
+EPANET compatibility with MATLAB parallel workers was evaluated before implementing optional parallel hydraulic evaluation. The final architecture uses independent worker-local EPANET objects and preserves the main-process evaluation cache.
+
+Parallel evaluation was validated for both GA and PSO, including numerical-equivalence tests, worker lifecycle tests, existing-pool reuse, GUI integration, and final performance measurements.
+
+The measured Two-Loop benchmark results showed approximately:
+
+```text
+GA: 1.53× parallel speedup
+PSO: 1.22× parallel speedup
+```
+
+while additional tests demonstrated that parallel execution is not universally faster. For this reason, parallel execution remains disabled by default and is not exposed as a GUI control.
+
+Phase 8 preserved the existing GA/PSO search mechanisms, constraint semantics, objective definition, GUI workflow, and optimization interfaces.
 
 The project will continue through the remaining development phases incrementally, with functional testing performed after each major change.

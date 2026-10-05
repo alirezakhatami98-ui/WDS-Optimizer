@@ -11,8 +11,9 @@ function [cost, viol, feas] = evaluateSolution(ind, Problem, d)
     FullD = Problem.InitialD;
     FullD(Problem.VariablePipes) = D(ind);
 
-    [Pj, Vpipes] = runHydraulicSimulation(d, NP, FullD);
-
+    [Pj, Vpipes] = runHydraulicSimulation( ...
+        d, NP, FullD, Problem.JunctionIndices);
+    
     cost = calculateCost(FullD, Problem.VariablePipes, Din, Cost, L);
 
     [viol, feas] = checkConstraints(Pj, Vpipes, Pmin, Vmax);

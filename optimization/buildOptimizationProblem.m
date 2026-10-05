@@ -1,6 +1,7 @@
 function Problem = buildOptimizationProblem( ...
     Din, Cost, D, NP, L, InitialD, ...
-    FixedPipes, VariablePipes, Pmin, Vmax)
+    FixedPipes, VariablePipes, Pmin, Vmax, ...
+    JunctionIndices)
 
     Problem.Din = Din;
     Problem.Cost = Cost;
@@ -15,5 +16,7 @@ function Problem = buildOptimizationProblem( ...
 
     Problem.Pmin = Pmin;
     Problem.Vmax = Vmax;
+
+    Problem.JunctionIndices = JunctionIndices;
 
 end

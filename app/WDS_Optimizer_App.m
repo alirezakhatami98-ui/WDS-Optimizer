@@ -113,6 +113,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             d = [];
             tempInpPath = '';
+            parallelInitialized = false;
 
             try
 
@@ -125,11 +126,23 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 [d, tempInpPath, Problem, Config] = ...
                     app.PrepareEnvironment();
 
+                % Initialize parallel hydraulic infrastructure only
+                % when parallel evaluation is explicitly enabled.
+                if Config.Parallel.Enabled
+
+                    initializeParallelHydraulics( ...
+                        tempInpPath, ...
+                        Config.Parallel.NumWorkers);
+
+                    parallelInitialized = true;
+                end
+
                 SelectedAlg = app.AlgorithmDropDown.Value;
 
                 if strcmp(SelectedAlg, 'Genetic Algorithm (GA)')
 
-                    [Score, Position, Conv, Feasible] = runGA(d, Problem, Config);
+                    [Score, Position, Conv, Feasible] = ...
+                        runGA(d, Problem, Config);
 
                     plot(app.UIAxes, 1:Config.MaxGen, Conv, ...
                         'LineWidth', 2, ...
@@ -142,7 +155,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 else
 
-                    [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config);
+                    [Score, Position, Conv, Feasible] = ...
+                        runPSO(d, Problem, Config);
 
                     plot(app.UIAxes, 1:Config.MaxGen, Conv, ...
                         'LineWidth', 2, ...
@@ -155,23 +169,43 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 end
 
-                app.UpdateGUIResults(d, Score, Position, Problem, Feasible);
+                % Worker EPANET objects are no longer needed after
+                % the optimization has completed.
+                if parallelInitialized
+                    cleanupParallelHydraulics();
+                    parallelInitialized = false;
+                end
+
+                app.UpdateGUIResults( ...
+                    d, Score, Position, Problem, Feasible);
 
                 cleanupEpanetObject(d);
                 d = [];
 
                 cleanupTempInpFiles(tempInpPath);
 
-                app.StatusLabel.Text = 'Status: Completed Successfully!';
+                app.StatusLabel.Text = ...
+                    'Status: Completed Successfully!';
+
                 app.ExportButton.Enable = 'on';
 
             catch ME
+
+                % Cleanup parallel worker EPANET objects first.
+                if parallelInitialized
+                    try
+                        cleanupParallelHydraulics();
+                    catch
+                    end
+
+                end
 
                 cleanupEpanetObject(d);
 
                 cleanupTempInpFiles(tempInpPath);
 
-                app.StatusLabel.Text = 'Status: Error occurred!';
+                app.StatusLabel.Text = ...
+                    'Status: Error occurred!';
 
                 uialert( ...
                     app.UIFigure, ...
@@ -207,6 +241,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 % 2. Load the updated INP file in EPANET
                 [d, NP, L, InitialD] = initializeNetwork(tempInpPath);
 
+                NodeTypes = d.getNodeType();
+                JunctionIndices = find(strcmpi(NodeTypes, 'JUNCTION'));
+
                 fixedPipes = validateFixedPipes( ...
                     app.FixedPipesEditField.Value, NP);
 
@@ -220,7 +257,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     Din, Cost, D, NP, L, InitialD, ...
                     fixedPipes, variablePipes, ...
                     app.PminEditField.Value, ...
-                    app.VmaxEditField.Value);
+                    app.VmaxEditField.Value, ...
+                    JunctionIndices);
 
                 MaxGen = app.MaxGenEditField.Value;
 

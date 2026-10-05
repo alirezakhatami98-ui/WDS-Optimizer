@@ -20,7 +20,11 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
 
     Pop = randi(ND, NVar, NS);
 
-    [cost, viol, ~] = evaluatePopulation(Pop, Problem, d);
+    Cache = createEvaluationCache();
+
+    [cost, viol, ~, Cache] = ...
+        evaluatePopulation( ...
+            Pop, Problem, d, Cache, Config.Parallel);
 
     for G = 1:MaxGen
 
@@ -69,7 +73,9 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
 
         Pop = NewPop;
 
-        [cost, viol, feas] = evaluatePopulation(Pop, Problem, d);
+        [cost, viol, feas, Cache] = ...
+            evaluatePopulation( ...
+                Pop, Problem, d, Cache, Config.Parallel);
 
         feasible_idx = find(feas);
 

@@ -10,4 +10,7 @@ function Config = buildAlgorithmConfig(NS, MaxGen)
     Config.PSO.c1 = 1.5;
     Config.PSO.c2 = 1.5;
 
+    Config.Parallel.Enabled = false;
+    Config.Parallel.NumWorkers = 2;
+
 end
