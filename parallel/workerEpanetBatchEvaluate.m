@@ -70,15 +70,8 @@ switch lower(action)
             CandidateD = DiameterTable(Candidates(:,k));
             CandidateD = CandidateD(:);
 
-            d.setLinkDiameter(1:NP, CandidateD');
-
-            d.solveCompleteHydraulics();
-
-            P = double(d.getNodePressure());
-            V = double(abs(d.getLinkVelocity()));
-
-            Pj(:,k) = P(JunctionIndices);
-            Vpipes(:,k) = V;
+            [Pj(:,k), Vpipes(:,k)] = runHydraulicSimulation( ...
+                d, NP, CandidateD, JunctionIndices);
 
         end
 

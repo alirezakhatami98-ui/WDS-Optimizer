@@ -900,13 +900,20 @@ The analysis showed that hydraulic simulation dominates optimization execution t
 
 A representative non-hydraulic benchmark showed that full-diameter construction, cost calculation, and constraint calculation together accounted for only a very small fraction of evaluation time compared with EPANET hydraulic simulation.
 
-A hydraulic evaluation breakdown showed that the dominant component was:
+A hydraulic evaluation breakdown showed that the EPANET hydraulic-analysis call dominated the evaluation cost, while diameter assignment and result extraction represented smaller portions.
+
+A follow-up lifecycle benchmark compared the previous `solveCompleteHydraulics()` path with the explicit hydraulic-analysis sequence used by the optimizer:
 
 ```text
-EPANET solveCompleteHydraulics
+openHydraulicAnalysis
+initializeHydraulicAnalysis(10)
+runHydraulicAnalysis
+closeHydraulicAnalysis
 ```
 
-while diameter assignment and result extraction represented smaller portions of the hydraulic evaluation cost.
+Using code `10` (`INITFLOW`) avoids saving a hydraulic file while re-initializing flows for each candidate evaluation. In the direct benchmark, the explicit lifecycle produced a median of `0.784 ms/solve` versus `3.479 ms/solve` for the previous complete-hydraulics path, with zero observed pressure or velocity differences.
+
+The same lifecycle was applied to the persistent worker-local EPANET evaluation path.
 
 Therefore, Phase 8 did not attempt unnecessary optimization of already inexpensive non-hydraulic operations.
 
@@ -941,33 +948,30 @@ Parallel hydraulic evaluation was evaluated only after confirming that independe
 
 The validated architecture produced exact hydraulic equivalence in the tested workloads, with zero observed pressure or velocity discrepancies between sequential and parallel evaluation.
 
-Representative final performance measurements on the Two-Loop benchmark were:
+Final comparison measurements were performed on two networks to determine whether the benefit of parallel execution is workload-dependent:
 
-| Algorithm | Sequential | Parallel | Speedup | Time Reduction |
-| --------- | ---------: | -------: | ------: | -------------: |
-| GA        |   205.86 s | 134.73 s |   1.53× |         34.56% |
-| PSO       |    40.54 s |  33.36 s |   1.22× |         17.72% |
+| Network | Algorithm | Sequential | Parallel | Result |
+| ------- | --------- | ---------: | -------: | ------ |
+| 2Loops | GA | 21.95 s | 72.98 s | Parallel 3.32× slower |
+| 2Loops | PSO | 6.08 s | 19.78 s | Parallel 3.25× slower |
+| Hanoi | GA | 148.37 s | 136.41 s | Parallel 1.09× faster (~8.1% reduction) |
+| Hanoi | PSO | 33.33 s | 30.70 s | Parallel 1.09× faster (~7.9% reduction) |
 
-These measurements demonstrate that parallel evaluation can provide a meaningful performance improvement for sufficiently expensive workloads.
+These measurements clearly show that parallel execution is **workload-dependent**. In the smaller 2Loops benchmark, parallel coordination overhead outweighed the benefit of distributing hydraulic evaluations. In the larger Hanoi test, parallel execution provided a modest improvement.
 
-However, parallel execution is **not universally faster**.
+The practical recommendation is therefore:
 
-Synthetic and intermediate tests showed that:
+* **Small networks / relatively short runs:** prefer the default sequential mode.
+* **Larger networks / more expensive runs:** parallel execution may be beneficial and is worth benchmarking.
+* **Uncertain cases:** compare sequential and parallel execution on the actual network and optimization settings before choosing the faster mode.
 
-* Parallel worker startup and coordination introduce overhead.
-* Small workloads may be slower when executed in parallel.
-* Workloads with very high cache-hit rates may provide little work for parallel workers.
-* GA and PSO can exhibit different levels of parallel benefit because their candidate-generation and repetition patterns differ.
-
-Therefore, the production configuration keeps:
+Parallel execution remains an **optional, user-controlled performance capability**. It is not enabled automatically and is not exposed as a GUI control. The user decides whether to enable it through the algorithm configuration:
 
 ```text
 Config.Parallel.Enabled = false
 ```
 
-by default.
-
-Parallel evaluation is considered an optional performance capability rather than a mandatory replacement for sequential evaluation.
+The default remains sequential because it is the safer general-purpose choice for small and moderate workloads.
 
 ---
 
@@ -1630,6 +1634,7 @@ Completed activities include:
 * Measurement and selection of cache lookup strategy
 * Static caching of junction indices
 * Analysis of EPANET object lifecycle during evaluation
+* Optimization of the hydraulic-analysis lifecycle using the direct EPANET hydraulic-analysis API
 * Measurement of non-hydraulic evaluation overhead
 * Measurement of hydraulic evaluation components
 * Analysis of variable-pipe versus full-pipe diameter assignment
@@ -1682,21 +1687,24 @@ Problem.JunctionIndices
 
 This avoids repeated node-type queries during candidate evaluation.
 
-### Hydraulic Bottleneck
+### Hydraulic Bottleneck and Lifecycle Optimization
 
 Phase 8 measurements showed that hydraulic simulation dominates evaluation cost.
 
 Non-hydraulic operations such as full-diameter construction, cost calculation, and constraint calculation represented only a small fraction of total evaluation time compared with EPANET hydraulic simulation.
 
-Hydraulic measurements further showed that:
+A direct benchmark showed that the previous `solveCompleteHydraulics()` path carried substantial lifecycle overhead. The production evaluation path was therefore changed to the explicit EPANET hydraulic-analysis sequence:
 
 ```text
-solveCompleteHydraulics
+openHydraulicAnalysis
+initializeHydraulicAnalysis(10)
+runHydraulicAnalysis
+closeHydraulicAnalysis
 ```
 
-is the dominant component of the hydraulic evaluation.
+The `10` initialization code corresponds to `INITFLOW`: hydraulic results are not saved, while flows are re-initialized for the next candidate evaluation. The direct benchmark produced exact pressure and velocity equivalence and a substantially lower median per-solve time (`0.784 ms` versus `3.479 ms`).
 
-Therefore, Phase 8 did not introduce unnecessary optimization of already inexpensive non-hydraulic calculations.
+The same lifecycle was applied to worker-local EPANET objects used by optional parallel evaluation.
 
 ### Parallel Hydraulic Evaluation
 
@@ -1706,26 +1714,24 @@ The final implementation uses independent worker-local EPANET objects rather tha
 
 The implementation was integrated into the common evaluation layer and validated with sequential/parallel equivalence tests.
 
-Representative final performance measurements on the Two-Loop benchmark were:
+Final two-network measurements were:
 
-| Algorithm | Sequential | Parallel | Speedup | Time Reduction |
-| --------- | ---------: | -------: | ------: | -------------: |
-| GA        |   205.86 s | 134.73 s |   1.53× |         34.56% |
-| PSO       |    40.54 s |  33.36 s |   1.22× |         17.72% |
+| Network | Algorithm | Sequential | Parallel | Result |
+| ------- | --------- | ---------: | -------: | ------ |
+| 2Loops | GA | 21.95 s | 72.98 s | Parallel 3.32× slower |
+| 2Loops | PSO | 6.08 s | 19.78 s | Parallel 3.25× slower |
+| Hanoi | GA | 148.37 s | 136.41 s | Parallel 1.09× faster (~8.1% reduction) |
+| Hanoi | PSO | 33.33 s | 30.70 s | Parallel 1.09× faster (~7.9% reduction) |
 
-These results justify retaining parallel evaluation as an optional capability.
+The measurements confirm that parallel execution should remain optional rather than being treated as a universal optimization.
 
-However, the tests also demonstrated that parallel execution is not universally faster. Small workloads and workloads with high cache-hit rates can suffer from parallel coordination overhead.
+The recommended usage is:
 
-Therefore:
+* Prefer sequential execution for small networks and relatively short runs.
+* Consider parallel execution for larger networks or more expensive workloads.
+* When performance is uncertain, benchmark both modes on the actual network and settings.
 
-```text
-Config.Parallel.Enabled = false
-```
-
-remains the production default.
-
-Parallel execution is an optional performance capability and is not exposed through the GUI.
+Parallel execution is user-controlled through `Config.Parallel.Enabled`, remains disabled by default, and is not exposed through the GUI.
 
 Phase 8 did not modify:
 
@@ -1847,16 +1853,11 @@ Static junction indexing was also introduced to avoid repeated network metadata 
 
 EPANET compatibility with MATLAB parallel workers was evaluated before implementing optional parallel hydraulic evaluation. The final architecture uses independent worker-local EPANET objects and preserves the main-process evaluation cache.
 
-Parallel evaluation was validated for both GA and PSO, including numerical-equivalence tests, worker lifecycle tests, existing-pool reuse, GUI integration, and final performance measurements.
+The hydraulic-analysis lifecycle was also optimized by replacing the previous complete-hydraulics call with the explicit EPANET analysis lifecycle. Direct benchmarking showed exact hydraulic equivalence with substantially lower per-solve overhead.
 
-The measured Two-Loop benchmark results showed approximately:
+Parallel evaluation was validated for both GA and PSO, including numerical-equivalence tests, worker lifecycle tests, existing-pool reuse, GUI integration, and final performance measurements on two networks. The final measurements showed that parallel performance depends strongly on workload: parallel execution was slower on 2Loops but approximately 1.09× faster on the larger Hanoi test.
 
-```text
-GA: 1.53× parallel speedup
-PSO: 1.22× parallel speedup
-```
-
-while additional tests demonstrated that parallel execution is not universally faster. For this reason, parallel execution remains disabled by default and is not exposed as a GUI control.
+For this reason, parallel execution remains disabled by default. The user may explicitly enable it when appropriate, but the application does not automatically select parallel mode and does not expose it as a GUI control.
 
 Phase 8 preserved the existing GA/PSO search mechanisms, constraint semantics, objective definition, GUI workflow, and optimization interfaces.
 
