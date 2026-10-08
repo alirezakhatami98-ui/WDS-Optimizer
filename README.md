@@ -98,6 +98,8 @@ Pm = 0.03
 
 These values are treated as algorithm configuration defaults rather than universal optimal values for all WDS optimization problems.
 
+GA supports optional controlled randomization through `Config.Seed`. Using the same numeric seed reproduces the same stochastic search behavior, while `Config.Seed = []` preserves the normal MATLAB stochastic behavior.
+
 ## Particle Swarm Optimization (PSO)
 
 The implemented PSO currently includes:
@@ -127,6 +129,8 @@ Config.PSO.c2 = 1.5
 ```
 
 These values are internal algorithm configuration defaults and are not exposed as GUI controls.
+
+PSO supports optional controlled randomization through `Config.Seed`. Using the same numeric seed reproduces the same stochastic search behavior, while `Config.Seed = []` preserves the normal MATLAB stochastic behavior.
 
 Both algorithms use the same centralized hydraulic constraint semantics through the common optimization evaluation framework.
 
@@ -456,6 +460,7 @@ The current algorithm configuration contains:
 ```text
 Config.NS
 Config.MaxGen
+Config.Seed
 
 Config.GA.Pc
 Config.GA.Pm
@@ -472,6 +477,7 @@ where:
 
 * `NS` is the population/swarm size.
 * `MaxGen` is the maximum number of generations/iterations.
+* `Config.Seed` - Optional random seed control. Use `[]` to preserve the current MATLAB RNG state and existing stochastic behavior, or set a numeric value (e.g., `42`) to make the optimization run reproducible.
 * `Config.GA.Pc` is the GA crossover probability.
 * `Config.GA.Pm` is the GA mutation probability.
 * `Config.PSO.w` is the PSO inertia weight.
@@ -500,6 +506,16 @@ algorithms/buildAlgorithmConfig.m
 This separation ensures that engineering problem data and algorithm execution settings are not mixed together.
 
 The `Problem` structure is shared by GA and PSO, while algorithm-specific search parameters are grouped under their respective configuration sections.
+
+### Random Seed Control
+
+`Config.Seed` provides optional control over the random-number generator used by GA and PSO:
+
+* `Config.Seed = []` - uses the current MATLAB RNG state and preserves the existing stochastic behavior.
+* `Config.Seed = N` - initializes the RNG with the specified numeric seed for a reproducible optimization run.
+* The seed is applied at the beginning of the GA or PSO run.
+* When a numeric seed is used, the MATLAB RNG state that existed before the run is restored after the run completes.
+* Seed control is currently available at the algorithm configuration/API level and is **not exposed in the GUI**.
 
 ---
 
@@ -1747,11 +1763,36 @@ The purpose of Phase 8 was performance improvement at the evaluation layer while
 
 ---
 
-## Phase 9 — Reproducibility
+## Phase 9 - Reproducibility
 
-**Status: Planned**
+**Status: Completed**
 
-Random seed control will be introduced to support reproducible optimization experiments.
+Phase 9 introduced controlled random seed handling for reproducible optimization experiments while preserving the existing GA and PSO search mechanisms.
+
+### Implemented
+
+* An optional `Config.Seed` field was added to the algorithm configuration.
+* `Config.Seed = []` preserves the existing MATLAB RNG state and stochastic behavior.
+* A numeric `Config.Seed` enables reproducible GA or PSO runs.
+* Seed initialization is applied at the beginning of the corresponding optimization algorithm.
+* The MATLAB RNG state that existed before a seeded run is restored after the run completes.
+* Seed handling is implemented at the algorithm level and does not modify the selection, evaluation, hydraulic, cache, or parallel-evaluation layers.
+* The GUI was not modified to expose seed control; seed configuration remains an API/configuration-level capability.
+
+### Validation
+
+The following tests were completed successfully:
+
+* GA reproducibility with the same seed.
+* PSO reproducibility with the same seed.
+* Different-seed behavior for GA and PSO.
+* Regression testing with `Config.Seed = []`.
+* Verification that a seeded optimization run does not permanently alter the external MATLAB RNG state.
+* Verification that the reproducibility mechanism remains compatible with the existing optimization workflow.
+
+The reproducibility tests confirmed that identical seeds reproduce the same stochastic optimization behavior, while different seeds can produce different search trajectories and solutions.
+
+Phase 9 did **not** change the GA or PSO mathematical search mechanisms, selection logic, crossover or mutation probabilities, GA penalty formulation, PSO equations, constraint semantics, feasibility ranking, evaluation cache, or parallel evaluation design.
 
 ---
 
@@ -1841,9 +1882,11 @@ Final documentation and release preparation will be performed after the architec
 
 **Phase 8:** Completed
 
-**Current next phase:** Phase 9 — Reproducibility
+**Phase 9:** Completed
 
-The repository has completed its initial architecture refactoring, input validation/configuration layer, temporary-file and EPANET lifecycle management, unified optimization problem representation, constraint-handling refinement, Genetic Algorithm review, Particle Swarm Optimization review, and performance optimization.
+**Current next phase:** Phase 10 - Benchmark & Experiment Framework
+
+The repository has completed its initial architecture refactoring, input validation/configuration layer, temporary-file and EPANET lifecycle management, unified optimization problem representation, constraint-handling refinement, Genetic Algorithm review, Particle Swarm Optimization review, performance optimization, and reproducibility improvements through optional random seed control.
 
 Phase 8 analyzed the optimization evaluation pipeline using measured performance data rather than speculative optimization.
 
@@ -1860,5 +1903,7 @@ Parallel evaluation was validated for both GA and PSO, including numerical-equiv
 For this reason, parallel execution remains disabled by default. The user may explicitly enable it when appropriate, but the application does not automatically select parallel mode and does not expose it as a GUI control.
 
 Phase 8 preserved the existing GA/PSO search mechanisms, constraint semantics, objective definition, GUI workflow, and optimization interfaces.
+
+**Phase 9 - Reproducibility** introduced optional random seed control through `Config.Seed`, enabling reproducible GA and PSO experiments while preserving the existing stochastic behavior when `Config.Seed = []`. Seeded runs restore the MATLAB RNG state after completion, and the existing optimization algorithms and search mechanisms remain unchanged.
 
 The project will continue through the remaining development phases incrementally, with functional testing performed after each major change.

@@ -1,5 +1,11 @@
 function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
 
+    if ~isempty(Config.Seed)
+        rngState = rng;
+        cleanupRng = onCleanup(@() rng(rngState));
+        rng(Config.Seed);
+    end
+
     NS = Config.NS;
     MaxGen = Config.MaxGen;
 

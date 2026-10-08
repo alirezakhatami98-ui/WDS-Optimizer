@@ -2,6 +2,7 @@ function Config = buildAlgorithmConfig(NS, MaxGen)
 
     Config.NS = NS;
     Config.MaxGen = MaxGen;
+    Config.Seed = [];
 
     Config.GA.Pc = 0.8;
     Config.GA.Pm = 0.03;

@@ -1,5 +1,11 @@
 function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
 
+    if ~isempty(Config.Seed)
+        rngState = rng;
+        cleanupRng = onCleanup(@() rng(rngState));
+        rng(Config.Seed);
+    end
+
     N = Config.NS;
     MaxGen = Config.MaxGen;
     ND = numel(Problem.D);
