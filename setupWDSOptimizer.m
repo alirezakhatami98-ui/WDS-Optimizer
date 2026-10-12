@@ -37,6 +37,7 @@ function setupWDSOptimizer()
         'utils'
         'validation'
         'parallel'
+        'experiments'
     };
 
     for i = 1:numel(sourceFolders)

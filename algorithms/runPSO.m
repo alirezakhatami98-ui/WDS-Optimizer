@@ -22,7 +22,16 @@ function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
     PBestCost = Inf(1, N);
     PBestViol = Inf(1, N);
 
-    Cache = createEvaluationCache();
+    % Use a supplied cache when available; otherwise create a per-run cache.
+    if isfield(Config, 'Cache') && isa(Config.Cache, 'containers.Map')
+        Cache = Config.Cache;
+    else
+        if isfield(Config, 'Cache') && ~isempty(Config.Cache)
+            error('runPSO:InvalidCache', ...
+                'Config.Cache must be a containers.Map object.');
+        end
+        Cache = createEvaluationCache();
+    end
 
     GBestX = [];
     GBestCost = Inf;

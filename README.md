@@ -28,6 +28,11 @@ The toolkit combines:
 * Structured input and configuration validation
 * Evaluation caching
 * Optional parallel hydraulic evaluation
+* Multi-run benchmark and experiment framework
+* Reproducible paired-seed GA/PSO experiments
+* Experiment statistics and convergence aggregation
+* Structured algorithm-summary and run-detail tables
+* Algorithm-comparison data builders for cost, execution time, and convergence
 
 The application allows users to load an EPANET network together with available pipe diameter and cost data, configure hydraulic and optimization parameters, select an optimization algorithm, and evaluate optimized pipe-diameter configurations subject to hydraulic constraints.
 
@@ -679,6 +684,18 @@ WDS-Optimizer/
 ├── data/
 │   └── loadOptimizationData.m
 │
+├── experiments/
+│   ├── resolveExperimentCache.m
+│   ├── runExperiment.m
+│   ├── aggregateExperimentStatistics.m
+│   ├── aggregateConvergenceData.m
+│   ├── buildAlgorithmSummaryTable.m
+│   ├── buildRunDetailsTable.m
+│   ├── buildCostComparisonData.m
+│   ├── buildExecutionTimeComparisonData.m
+│   ├── buildConvergencePlotData.m
+│   └── buildAlgorithmComparisonData.m
+│
 ├── validation/
 │   ├── validateOptimizationData.m
 │   ├── validateOptimizationParameters.m
@@ -703,6 +720,8 @@ WDS-Optimizer/
 ```
 
 The `validation` directory contains the input and configuration validation layer introduced during Phase 2.
+
+The `experiments` directory contains the multi-run experiment runner, cache lifecycle resolution, statistical and convergence aggregation, and summary/run-detail/comparison data builders. These functions prepare structured experiment outputs but do not add experiment controls or new charts to the GUI; GUI integration is planned for Phase 11.
 
 The `optimization` directory contains the centralized optimization problem representation and the optimization evaluation functions.
 
@@ -773,6 +792,111 @@ The cache is an exact evaluation reuse mechanism. It does not approximate hydrau
 The effectiveness of caching depends on how frequently the optimization algorithm generates duplicate candidate chromosomes.
 
 During Phase 8 measurements, duplicate evaluations were observed in both algorithms, with particularly high repetition in PSO. Therefore, caching was retained as part of the production evaluation architecture.
+
+---
+
+# Benchmark & Experiment Framework
+
+Phase 10 introduced a programmatic experiment framework for running and comparing GA and PSO over multiple independent runs. It is separate from the existing GUI single-run workflow; the GUI was not changed in Phase 10.
+
+## Public Entry Point
+
+The main entry point is:
+
+```matlab
+ExperimentResult = runExperiment(d, Problem, Config, ExperimentOptions);
+```
+
+- `d` is the initialized EPANET object.
+- `Problem` is the unified optimization problem shared by GA and PSO.
+- `Config` is produced by `buildAlgorithmConfig(NS, MaxGen)` and supplies the algorithm settings.
+- `ExperimentOptions` specifies the experiment-level settings.
+
+The supported experiment option fields are:
+
+```text
+ExperimentOptions.NumberOfRuns
+ExperimentOptions.Algorithms
+ExperimentOptions.ExperimentSeed
+ExperimentOptions.CacheMode
+```
+
+`NumberOfRuns` sets the number of runs per selected algorithm. `Algorithms` selects `GA`, `PSO`, or both. The experiment seed controls generation of the run-seed list, and `CacheMode` selects the evaluation-cache lifecycle.
+
+## Reproducibility and Run Design
+
+The experiment runner generates a deterministic `RunSeeds` list from `ExperimentSeed` using MATLAB's `mt19937ar` random stream. When both algorithms are selected, the same run-seed list is used for GA and PSO. This is a paired-seed design: it controls the seed inputs for comparison, but does not imply that GA and PSO follow identical search trajectories.
+
+Runs are executed sequentially, with GA before PSO when both are selected. The runner records a result for each algorithm/run combination, including the algorithm, run index, seed, score, position, feasibility, execution time, convergence vector, and status.
+
+Execution time measures only the call to `runGA` or `runPSO`. It excludes experiment setup, cache resolution, temporary-file preparation, and any parallel-pool initialization.
+
+## Cache Modes
+
+The experiment framework supports two cache modes:
+
+- **`PerRun`** — creates a fresh evaluation cache for each run. This is the default and keeps each run's cache lifecycle independent.
+- **`SharedExperiment`** — reuses one evaluation cache across all runs and selected algorithms within the same experiment.
+
+A shared cache is valid only while the hydraulic model, `Problem`, and objective/evaluation context remain unchanged. It is never shared across separate experiment invocations. Because cache hits depend on prior evaluations, `SharedExperiment` can affect measured execution times and makes timings dependent on run order. Use `PerRun` when independent per-run timing is the priority.
+
+The cache mode applies to the experiment framework. The regular GUI single-run workflow remains unchanged.
+
+## Result Structure
+
+`runExperiment` returns an `ExperimentResult` structure containing:
+
+- `Metadata` — experiment ID, date/time, and toolkit version.
+- `Configuration` — run count, selected algorithms, experiment seed, cache mode, and relevant problem/configuration metadata.
+- `Results` — per-algorithm run records, statistics, and convergence aggregates.
+- `RunSeeds` — the seed list used for the experiment.
+
+Each run record contains:
+
+```text
+Algorithm
+RunIndex
+Seed
+Score
+Position
+Feasible
+ExecutionTime
+Conv
+Status
+```
+
+## Statistical and Comparison Outputs
+
+The framework calculates statistics and creates table/plot-ready data without drawing new GUI charts.
+
+- **Algorithm statistics** include total, successful, failed, and feasible run counts; feasibility rate; best, mean, and sample standard deviation of feasible successful-run costs; and best, mean, and sample standard deviation of valid successful-run execution times.
+- **Cost statistics** use only successful, feasible runs with finite scores. If no feasible successful run exists, cost statistics are `NaN`. With one eligible observation, its mean/best is available while sample standard deviation is `NaN`.
+- **Time statistics** use successful runs with finite, nonnegative execution times, regardless of feasibility. With one eligible observation, sample standard deviation is `NaN`.
+- **Feasibility rate** is the number of feasible successful runs divided by all recorded runs for that algorithm.
+- **Convergence aggregation** uses successful runs with finite, nonempty convergence vectors of equal length. It reports generation, mean, sample standard deviation, median, minimum, maximum, and number of contributing runs.
+
+The public builders are:
+
+```text
+experiments/aggregateExperimentStatistics.m
+experiments/aggregateConvergenceData.m
+experiments/buildAlgorithmSummaryTable.m
+experiments/buildRunDetailsTable.m
+experiments/buildCostComparisonData.m
+experiments/buildExecutionTimeComparisonData.m
+experiments/buildConvergencePlotData.m
+experiments/buildAlgorithmComparisonData.m
+```
+
+`buildAlgorithmComparisonData` composes the summary, cost-comparison, and execution-time-comparison tables. `buildConvergencePlotData` returns the already-aggregated convergence series for the algorithms present in the experiment. These builders reuse the framework's calculated statistics rather than independently recalculating them.
+
+## Validation Status and Current Boundary
+
+Phase 10 was validated using unit tests and an EPANET integration test on the Two-Loop network. The integration test checked experiment metadata/configuration, run seeds and ordering, run status/count consistency, statistics, summary/run-detail tables, cost/time comparison data, and convergence data. Both GA and PSO completed the tested runs successfully.
+
+The existing single-run GUI was then regression-tested: the application opened, GA and PSO single runs completed, result tabs and convergence charts worked, and Excel export remained functional. This confirms compatibility of the existing workflow; it does not mean the new experiment framework is already accessible through the GUI.
+
+The experiment framework currently produces MATLAB structures and tables. GUI controls, progress/cancellation behavior, interactive comparison charts, and report/export integration for multi-run experiments remain future work in Phases 11 and 12.
 
 ---
 
@@ -1798,19 +1922,32 @@ Phase 9 did **not** change the GA or PSO mathematical search mechanisms, selecti
 
 ## Phase 10 — Benchmark / Experiment Framework
 
-**Status: Planned**
+**Status: Completed**
 
-A formal experimental framework will be developed for comparing algorithms using:
+Phase 10 introduced a programmatic framework for repeatable multi-run experiments and GA/PSO comparison, while deliberately preserving the existing single-run GUI workflow.
 
-* Multiple independent runs
-* Best cost
-* Mean cost
-* Standard deviation
-* Execution time
-* Feasibility rate
-* Convergence comparison
+Completed activities include:
 
-Benchmark functionality is intentionally not part of the current single-optimization workflow and will be reintroduced in a later development phase.
+* Definition of experiment semantics and the result data contract
+* Deterministic generation of run seeds from an experiment seed
+* Paired run-seed lists for GA and PSO comparisons
+* Explicit cache lifecycle and cache modes (`PerRun` and `SharedExperiment`)
+* Implementation of the multi-run experiment runner
+* Collection of per-run algorithm, seed, score, position, feasibility, timing, convergence, and status data
+* Aggregation of feasibility, cost, execution-time, and convergence statistics
+* Construction of algorithm-summary and run-detail tables
+* Construction of cost- and execution-time-comparison tables
+* Construction of convergence plot data and combined algorithm-comparison data
+* Unit testing of experiment execution, cache modes, statistics, convergence, and data builders
+* End-to-end EPANET integration testing on the Two-Loop network
+* Regression testing of the existing single-run GUI workflow, including GA, PSO, convergence charts, result tabs, and Excel export
+* Verification that experiment-framework changes did not require GUI behavior changes
+
+The framework uses the same unified `Problem` and algorithm `Config` as the existing optimizer. Runs are executed sequentially; when both algorithms are selected, GA runs precede PSO runs and both receive the same generated seed list. This is a paired-seed design, not a claim that the algorithms follow identical trajectories.
+
+The default experiment cache mode is `PerRun`. `SharedExperiment` is available when the problem/evaluation context remains fixed, but cache reuse can influence execution-time comparisons. The timing metric measures the algorithm call itself and excludes setup, cache resolution, temporary-file preparation, and parallel-pool initialization.
+
+Phase 10 does not add experiment controls, comparison charts, cancellation, or reporting exports to the GUI. Those integrations are assigned to Phases 11 and 12.
 
 ---
 
@@ -1818,15 +1955,23 @@ Benchmark functionality is intentionally not part of the current single-optimiza
 
 **Status: Planned**
 
-Planned GUI improvements include:
+Phase 11 will integrate the existing experiment framework into the GUI while preserving the current single-run workflow as a supported path.
 
-* Improved validation messages
-* Progress indication
-* Optimization cancellation
-* Feasibility display
-* Advanced settings
-* Improved result presentation
-* Improved error management
+Planned activities include:
+
+* Review the current GUI layout and define a clear separation between single-run optimization and multi-run experiments
+* Add experiment controls for number of runs, selected algorithms, experiment seed, and cache mode
+* Reuse the existing `Problem`, `Config`, and `runExperiment` interfaces instead of duplicating optimization logic in the GUI
+* Present experiment-level progress and per-run status without blocking the user unnecessarily
+* Define safe cancellation behavior and cleanup for an experiment that is interrupted or fails
+* Display the algorithm-summary and run-detail tables produced by the Phase 10 builders
+* Add comparison visualizations for cost statistics, execution time, and aggregated convergence
+* Clearly distinguish successful, failed, feasible, and infeasible runs
+* Explain when cost statistics are unavailable because no successful feasible run exists
+* Keep the existing single-run GA/PSO execution, hydraulic result tabs, convergence charts, and Excel export behavior intact
+* Add GUI regression tests for both single-run and multi-run workflows
+
+Phase 10 supplies the experiment runner, statistics, convergence aggregates, and comparison-ready data. Phase 11 is responsible for presenting these data and connecting user interaction to the framework; it should not reimplement the statistics or optimization logic inside the GUI.
 
 ---
 
@@ -1834,7 +1979,23 @@ Planned GUI improvements include:
 
 **Status: Planned**
 
-The reporting system will be expanded to provide structured optimization and hydraulic reports.
+Phase 12 will turn the structured single-run and experiment outputs into consistent, exportable engineering reports. The Phase 10 `ExperimentResult` structure and table/plot-data builders provide the data contract for multi-run reporting.
+
+Planned activities include:
+
+* Define a report data contract that consumes `ExperimentResult` and the existing single-run hydraulic/optimization results
+* Include experiment metadata, toolkit version, configuration, selected algorithms, run count, experiment seed, run seeds, and cache mode
+* Include algorithm summary statistics and per-run details
+* Include cost, execution-time, feasibility-rate, and convergence comparisons
+* Preserve the distinction between feasible-cost statistics and execution-time statistics
+* Report failed runs and explain missing/`NaN` cost statistics where no eligible feasible result exists
+* Include hydraulic and optimized-design details where applicable to the selected report type
+* Design consistent table labels, units, number formatting, captions, and explanatory notes
+* Implement report export using a clearly defined supported format set, with Excel as the initial structured-data target and additional document/PDF output evaluated as a separate implementation decision
+* Validate exported content against the underlying `ExperimentResult` and data-builder outputs
+* Test reports for GA-only, PSO-only, combined GA/PSO, failed runs, no-feasible-run cases, and one-run statistical edge cases
+
+Phase 12 should consume the existing Phase 10 result contract rather than recalculate statistics in the export layer. Any report-specific transformations must preserve the definitions and limitations documented in the experiment framework.
 
 ---
 
@@ -1884,9 +2045,11 @@ Final documentation and release preparation will be performed after the architec
 
 **Phase 9:** Completed
 
-**Current next phase:** Phase 10 - Benchmark & Experiment Framework
+**Phase 10:** Completed
 
-The repository has completed its initial architecture refactoring, input validation/configuration layer, temporary-file and EPANET lifecycle management, unified optimization problem representation, constraint-handling refinement, Genetic Algorithm review, Particle Swarm Optimization review, performance optimization, and reproducibility improvements through optional random seed control.
+**Current next phase:** Phase 11 - GUI Enhancement
+
+The repository has completed its initial architecture refactoring, input validation/configuration layer, temporary-file and EPANET lifecycle management, unified optimization problem representation, constraint-handling refinement, Genetic Algorithm review, Particle Swarm Optimization review, performance optimization, reproducibility improvements, and the programmatic multi-run experiment framework.
 
 Phase 8 analyzed the optimization evaluation pipeline using measured performance data rather than speculative optimization.
 
@@ -1904,6 +2067,8 @@ For this reason, parallel execution remains disabled by default. The user may ex
 
 Phase 8 preserved the existing GA/PSO search mechanisms, constraint semantics, objective definition, GUI workflow, and optimization interfaces.
 
-**Phase 9 - Reproducibility** introduced optional random seed control through `Config.Seed`, enabling reproducible GA and PSO experiments while preserving the existing stochastic behavior when `Config.Seed = []`. Seeded runs restore the MATLAB RNG state after completion, and the existing optimization algorithms and search mechanisms remain unchanged.
+**Phase 9 - Reproducibility** introduced optional random seed control through `Config.Seed`, enabling reproducible GA and PSO runs while preserving the existing stochastic behavior when `Config.Seed = []`. Seeded runs restore the MATLAB RNG state after completion, and the existing optimization algorithms and search mechanisms remain unchanged.
 
-The project will continue through the remaining development phases incrementally, with functional testing performed after each major change.
+**Phase 10 - Benchmark / Experiment Framework** added a programmatic multi-run runner, paired run seeds, explicit cache modes, statistical and convergence aggregation, and comparison-ready tables/data. Unit and EPANET integration tests passed, and the existing single-run GUI was regression-tested successfully. Experiment controls and multi-run reporting are not yet integrated into the GUI.
+
+The next step is Phase 11 — GUI Enhancement, followed by Phase 12 — Professional Reporting. The project will continue through the remaining development phases incrementally, with functional testing performed after each major change.

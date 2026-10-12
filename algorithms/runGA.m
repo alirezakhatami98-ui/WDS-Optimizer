@@ -26,7 +26,16 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
 
     Pop = randi(ND, NVar, NS);
 
-    Cache = createEvaluationCache();
+    % Use a supplied cache when available; otherwise create a per-run cache.
+    if isfield(Config, 'Cache') && isa(Config.Cache, 'containers.Map')
+        Cache = Config.Cache;
+    else
+        if isfield(Config, 'Cache') && ~isempty(Config.Cache)
+            error('runGA:InvalidCache', ...
+                'Config.Cache must be a containers.Map object.');
+        end
+        Cache = createEvaluationCache();
+    end
 
     [cost, viol, ~, Cache] = ...
         evaluatePopulation( ...
