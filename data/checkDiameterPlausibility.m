@@ -1,7 +1,7 @@
 function checkDiameterPlausibility(D, DiameterUnit)
 % Guards against a wrongly selected diameter-file unit.
 
-    MinMM = 10;
+    MinMM = 20;
     MaxMM = 6000;
 
     if strcmp(DiameterUnit, 'in')
