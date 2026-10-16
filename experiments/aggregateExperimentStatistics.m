@@ -83,7 +83,23 @@ function Statistics = aggregateExperimentStatistics(Runs)
 
     Statistics.TotalRuns = TotalRuns;
     Statistics.SuccessfulRuns = sum(Successful);
-    Statistics.FailedRuns = TotalRuns - Statistics.SuccessfulRuns;
+
+    Failed = false(TotalRuns, 1);
+    NotStarted = false(TotalRuns, 1);
+
+    for k = 1:TotalRuns
+        Status = Runs(k).Status;
+
+        if isstring(Status) && isscalar(Status)
+            Status = char(Status);
+        end
+
+        Failed(k) = strcmpi(Status, 'Failed');
+        NotStarted(k) = strcmpi(Status, 'NotStarted');
+    end
+
+    Statistics.FailedRuns = sum(Failed);
+    Statistics.NotStartedRuns = sum(NotStarted);
     Statistics.FeasibleRuns = sum(FeasibleSuccessful);
 
     if TotalRuns > 0

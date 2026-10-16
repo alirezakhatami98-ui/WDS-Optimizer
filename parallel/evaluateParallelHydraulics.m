@@ -1,4 +1,4 @@
-function [Pj, Vpipes] = evaluateParallelHydraulics( ...
+function [Pj, Vpipes, Converged] = evaluateParallelHydraulics( ...
     Candidates, Problem)
 
 % evaluateParallelHydraulics
@@ -29,6 +29,7 @@ function [Pj, Vpipes] = evaluateParallelHydraulics( ...
     if isempty(Candidates)
         Pj = zeros(numel(Problem.JunctionIndices), 0);
         Vpipes = zeros(Problem.NP, 0);
+        Converged = true(1, 0);
         return;
     end
 
@@ -75,13 +76,14 @@ function [Pj, Vpipes] = evaluateParallelHydraulics( ...
 
             resultP = zeros(NumJunctions, 0);
             resultV = zeros(NP, 0);
+            resultC = true(1, 0);
             resultIdx = zeros(1, 0);
 
         else
 
             localCandidates = Candidates(:, idx);
 
-            [resultP, resultV] = ...
+            [resultP, resultV, resultC] = ...
                 workerEpanetBatchEvaluate( ...
                     'evaluate', ...
                     localCandidates, ...
@@ -99,6 +101,7 @@ function [Pj, Vpipes] = evaluateParallelHydraulics( ...
     % -------------------------------------------------------------
     Pj = zeros(NumJunctions, NumEvaluations);
     Vpipes = zeros(NP, NumEvaluations);
+    Converged = true(1, NumEvaluations);
 
     for w = 1:numWorkers
 
@@ -108,11 +111,9 @@ function [Pj, Vpipes] = evaluateParallelHydraulics( ...
             continue;
         end
 
-        workerP = resultP{w};
-        workerV = resultV{w};
-
-        Pj(:, idx) = workerP;
-        Vpipes(:, idx) = workerV;
+        Pj(:, idx) = resultP{w};
+        Vpipes(:, idx) = resultV{w};
+        Converged(idx) = resultC{w};
 
     end
 

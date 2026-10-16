@@ -1,16 +1,27 @@
-function pipeTable = createPipeResultsTable(NP, OptimalDiameters, PipeVelocities)
+function pipeTable = createPipeResultsTable( ...
+    NP, OptimalDiameters, PipeVelocities, Units)
+
+    % Without Units the legacy metric column names are used.
+    if nargin < 4 || isempty(Units)
+        Units.DiameterUnit = 'mm';
+        Units.VelocityUnit = 'm/s';
+    end
 
     Pipe_ID = (1:NP)';
+    Diameter = OptimalDiameters(:);
+    Velocity = PipeVelocities(:);
 
-    Diameter_mm = OptimalDiameters(:);
+    DiameterName = matlab.lang.makeValidName( ...
+        ['Diameter_' Units.DiameterUnit]);
 
-    Velocity_m_s = PipeVelocities(:);
+    VelocityName = matlab.lang.makeValidName( ...
+        ['Velocity_' strrep(Units.VelocityUnit, '/', '_')]);
 
     pipeTable = table( ...
         Pipe_ID, ...
-        Diameter_mm, ...
-        Velocity_m_s, ...
+        Diameter, ...
+        Velocity, ...
         'VariableNames', ...
-        {'Pipe_ID', 'Diameter_mm', 'Velocity_m_s'});
+        {'Pipe_ID', DiameterName, VelocityName});
 
 end

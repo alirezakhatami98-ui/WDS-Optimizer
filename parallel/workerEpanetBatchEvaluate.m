@@ -64,20 +64,22 @@ switch lower(action)
 
         Pj = zeros(NumJunctions, NumEvaluations);
         Vpipes = zeros(NP, NumEvaluations);
+        Converged = true(1, NumEvaluations);
 
         for k = 1:NumEvaluations
 
             CandidateD = DiameterTable(Candidates(:,k));
             CandidateD = CandidateD(:);
 
-            [Pj(:,k), Vpipes(:,k)] = runHydraulicSimulation( ...
-                d, NP, CandidateD, JunctionIndices);
+            [Pj(:,k), Vpipes(:,k), Converged(k)] = ...
+                runHydraulicSimulation( ...
+                    d, NP, CandidateD, JunctionIndices);
 
         end
 
         varargout{1} = Pj;
         varargout{2} = Vpipes;
-
+        varargout{3} = Converged;
 
     case 'cleanup'
 

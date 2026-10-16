@@ -181,6 +181,8 @@ function ExperimentResult = runExperiment( ...
 
     %% Execute each selected algorithm
 
+    ExperimentCompletedSuccessfully = true;
+
     for a = 1:numel(SelectedAlgorithms)
 
         Algorithm = SelectedAlgorithms{a};
@@ -197,9 +199,12 @@ function ExperimentResult = runExperiment( ...
             'Feasible', false, ...
             'ExecutionTime', NaN, ...
             'Conv', [], ...
-            'Status', 'NotStarted');
+            'Status', 'NotStarted', ...
+            'ErrorMessage', '');
 
         Runs = repmat(RunTemplate, NumberOfRuns, 1);
+
+        StopExperiment = false;
 
         for r = 1:NumberOfRuns
 
@@ -215,34 +220,76 @@ function ExperimentResult = runExperiment( ...
             RunConfig.Seed = RunSeeds(r);
             RunConfig.Cache = RunCache;
 
-            % Time only the algorithm execution.
-            timerStart = tic;
-
-            switch Algorithm
-
-                case 'GA'
-                    [Score, Position, Conv, Feasible] = ...
-                        runGA(d, Problem, RunConfig);
-
-                case 'PSO'
-                    [Score, Position, Conv, Feasible] = ...
-                        runPSO(d, Problem, RunConfig);
-
-            end
-
-            ExecutionTime = toc(timerStart);
-
-            % Store raw output from this run.
+            % Initialize this run's result metadata before execution.
             Runs(r).Algorithm = Algorithm;
             Runs(r).RunIndex = r;
             Runs(r).Seed = RunSeeds(r);
-            Runs(r).Score = Score;
-            Runs(r).Position = Position;
-            Runs(r).Feasible = Feasible;
-            Runs(r).ExecutionTime = ExecutionTime;
-            Runs(r).Conv = Conv;
-            Runs(r).Status = 'Success';
 
+            % Time only the algorithm execution.
+            timerStart = tic;
+
+            try
+
+                switch Algorithm
+
+                    case 'GA'
+                        [Score, Position, Conv, Feasible] = ...
+                            runGA(d, Problem, RunConfig);
+
+                    case 'PSO'
+                        [Score, Position, Conv, Feasible] = ...
+                            runPSO(d, Problem, RunConfig);
+
+                end
+
+                ExecutionTime = toc(timerStart);
+
+                % Store successful run output.
+                Runs(r).Score = Score;
+                Runs(r).Position = Position;
+                Runs(r).Feasible = Feasible;
+                Runs(r).ExecutionTime = ExecutionTime;
+                Runs(r).Conv = Conv;
+                Runs(r).Status = 'Success';
+
+            catch ME
+
+                ExecutionTime = toc(timerStart);
+
+                % Preserve failure information without aborting
+                % the remaining sequential runs.
+                Runs(r).ExecutionTime = ExecutionTime;
+                Runs(r).Status = 'Failed';
+                Runs(r).ErrorMessage = ME.message;
+
+                warning('runExperiment:RunFailed', ...
+                    '%s run %d/%d failed: %s', ...
+                    Algorithm, r, NumberOfRuns, ME.message);
+
+                if isfield(Config, 'Parallel') && ...
+                        isfield(Config.Parallel, 'Enabled') && ...
+                        Config.Parallel.Enabled
+
+                    StopExperiment = true;
+                    break;
+
+                end
+
+            end
+
+        end
+
+        % Complete metadata for runs that were never started.
+        for r = 1:numel(Runs)
+            if strcmpi(Runs(r).Status, 'NotStarted') && ...
+                    Runs(r).RunIndex == 0
+
+                Runs(r).Algorithm = Algorithm;
+                Runs(r).RunIndex = r;
+                Runs(r).Seed = RunSeeds(r);
+                Runs(r).ErrorMessage = ...
+                    'Run not started because the experiment stopped after a parallel execution failure.';
+            end
         end
 
         ExperimentResult.Results.(Algorithm).Runs = Runs;
@@ -253,11 +300,55 @@ function ExperimentResult = runExperiment( ...
         ExperimentResult.Results.(Algorithm).ConvergenceData = ...
             aggregateConvergenceData(Runs);
 
-        fprintf('Completed %s: %d/%d runs.\n', ...
-            Algorithm, NumberOfRuns, NumberOfRuns);
+        if StopExperiment
+            ExperimentCompletedSuccessfully = false;
+
+            fprintf(['Stopping experiment after failure in parallel ' ...
+                'execution of %s.\n'], Algorithm);
+
+            % Record algorithms that will not be started.
+            for nextA = a + 1:numel(SelectedAlgorithms)
+
+                PendingAlgorithm = SelectedAlgorithms{nextA};
+
+                PendingRuns = repmat(RunTemplate, NumberOfRuns, 1);
+
+                for r = 1:NumberOfRuns
+
+                    PendingRuns(r).Algorithm = PendingAlgorithm;
+                    PendingRuns(r).RunIndex = r;
+                    PendingRuns(r).Seed = RunSeeds(r);
+                    PendingRuns(r).Status = 'NotStarted';
+                    PendingRuns(r).ErrorMessage = ...
+                        'Experiment stopped before this algorithm started.';
+
+                end
+
+                ExperimentResult.Results.(PendingAlgorithm).Runs = ...
+                    PendingRuns;
+
+                ExperimentResult.Results.(PendingAlgorithm).Statistics = ...
+                    aggregateExperimentStatistics(PendingRuns);
+
+                ExperimentResult.Results.(PendingAlgorithm).ConvergenceData = ...
+                    aggregateConvergenceData(PendingRuns);
+
+            end
+
+            break;
+
+        end
+
+        fprintf('Completed %s: %d/%d runs successful.\n', Algorithm, ...
+            ExperimentResult.Results.(Algorithm).Statistics.SuccessfulRuns, ...
+            NumberOfRuns);
 
     end
 
-    fprintf('\nExperiment completed successfully.\n');
+    if ExperimentCompletedSuccessfully
+        fprintf('\nExperiment completed successfully.\n');
+    else
+        fprintf('\nExperiment stopped before all algorithms completed.\n');
+    end
 
 end
