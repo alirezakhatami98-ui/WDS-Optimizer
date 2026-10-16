@@ -1,8 +1,24 @@
 function Units = detectNetworkUnitsFromFile(inpFile)
 
-    [d, ~, ~, ~] = initializeNetwork(inpFile);
-    cleanupObj = onCleanup(@() cleanupEpanetObject(d)); %#ok<NASGU>
+    tempInpPath = createTempInpFile(inpFile);
 
-    Units = detectNetworkUnits(d);
+    d = [];
+
+    try
+        [d, ~, ~, ~] = initializeNetwork(tempInpPath);
+
+        Units = detectNetworkUnits(d);
+
+    catch ME
+        if ~isempty(d)
+            cleanupEpanetObject(d);
+        end
+
+        cleanupTempInpFiles(tempInpPath);
+        rethrow(ME);
+    end
+
+    cleanupEpanetObject(d);
+    cleanupTempInpFiles(tempInpPath);
 
 end
