@@ -9,6 +9,27 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
     NS = Config.NS;
     MaxGen = Config.MaxGen;
 
+    % Optional callback for live progress reporting.
+    ProgressCallback = [];
+
+    if isfield(Config, 'ProgressCallback') && ...
+            ~isempty(Config.ProgressCallback)
+
+        if ~isa(Config.ProgressCallback, 'function_handle')
+            error('runGA:InvalidProgressCallback', ...
+                'Config.ProgressCallback must be a function handle.');
+        end
+
+        ProgressCallback = Config.ProgressCallback;
+
+    end
+
+    % Report progress at approximately 50 points or fewer,
+    % while always including the first and last generations.
+    ProgressInterval = max(1, ceil(MaxGen / 50));
+
+    ProgressCallbackFailed = false;
+
     Pc = Config.GA.Pc;
     Pm = Config.GA.Pm;
 
@@ -123,6 +144,40 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
         else
 
             Conv(G) = BestUnfeasibleCost;
+
+        end
+
+        % Report selected generations to the optional callback.
+        ShouldReportProgress = ...
+            (G == 1) || ...
+            (mod(G - 1, ProgressInterval) == 0) || ...
+            (G == MaxGen);
+
+        if ~isempty(ProgressCallback) && ...
+                ~ProgressCallbackFailed && ShouldReportProgress
+
+            ProgressInfo = struct( ...
+                'Algorithm', 'GA', ...
+                'Generation', G, ...
+                'MaxGenerations', MaxGen, ...
+                'BestCost', Conv(G), ...
+                'Feasible', ~isempty(BestSolEver), ...
+                'Convergence', Conv(1:G));
+
+            try
+
+                ProgressCallback(ProgressInfo);
+
+            catch ME
+
+                % A monitoring failure must not stop optimization.
+                warning('runGA:ProgressCallbackFailed', ...
+                    'Progress reporting disabled after an error: %s', ...
+                    ME.message);
+
+                ProgressCallbackFailed = true;
+
+            end
 
         end
 

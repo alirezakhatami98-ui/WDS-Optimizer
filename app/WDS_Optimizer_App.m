@@ -62,6 +62,12 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         % Tab: All Runs
         UITableRuns           matlab.ui.control.Table
 
+        % Live Monitor window
+        LiveMonitorFigure        matlab.ui.Figure
+        LiveRunAxes              matlab.ui.control.UIAxes
+        LiveMonitorStatusLabel   matlab.ui.control.Label
+        LiveConvergenceLine      matlab.graphics.chart.primitive.Line
+
         % Internal data storage
         InpFileStr
         DFileStr
@@ -196,12 +202,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.StatusLabel.Text = 'Status: Running Experiment...';
             app.RunButton.Enable = 'off';
             app.ExportButton.Enable = 'off';
-            drawnow;
 
-            dlg = uiprogressdlg(app.UIFigure, ...
-                'Title', 'Running Experiment', ...
-                'Message', 'Preparing the network and optimization problem...', ...
-                'Indeterminate', 'on');
+            app.CreateLiveMonitorWindow();
+            drawnow;
 
             d = [];
             tempInpPath = '';
@@ -253,11 +256,22 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 ExperimentOptions.CacheMode = ...
                     Settings.CacheMode;
 
+                %% Live Monitor callback
+
+                app.UpdateLiveMonitorStatus( ...
+                    'Preparing optimization problem...');
+
+                ExperimentOptions.ProgressCallback = ...
+                    @(ProgressInfo) app.UpdateLiveMonitor(ProgressInfo);
+
+                drawnow;
+
                 %% 3. Initialize parallel hydraulic infrastructure
 
                 if Config.Parallel.Enabled
 
-                    dlg.Message = 'Starting parallel workers...';
+                    app.UpdateLiveMonitorStatus( ...
+                        'Starting parallel workers...');
 
                     initializeParallelHydraulics( ...
                         tempInpPath, ...
@@ -268,16 +282,15 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 %% 4. Run the experiment
 
-                dlg.Message = sprintf( ...
-                    ['Running %s: %d run(s) per algorithm.\n' ...
-                    'This may take a while...'], ...
+                app.UpdateLiveMonitorStatus(sprintf( ...
+                    'Running %s: %d run(s) per algorithm...', ...
                     strjoin(ExperimentAlgorithms, ' + '), ...
-                    ExperimentOptions.NumberOfRuns);
+                    ExperimentOptions.NumberOfRuns));
 
                 ExpResult = runExperiment( ...
                     d, Problem, Config, ExperimentOptions);
 
-                dlg.Message = 'Collecting results...';
+                app.UpdateLiveMonitorStatus('Collecting results...');
 
                 %% 5. Collect successful runs
 
@@ -443,8 +456,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 end
 
-                if isvalid(dlg)
-                    close(dlg);
+                if ~isempty(app.LiveMonitorFigure) && ...
+                        isvalid(app.LiveMonitorFigure)
+                    close(app.LiveMonitorFigure);
                 end
 
                 if ~Converged
@@ -477,8 +491,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 cleanupEpanetObject(d);
                 cleanupTempInpFiles(tempInpPath);
 
-                if isvalid(dlg)
-                    close(dlg);
+                if ~isempty(app.LiveMonitorFigure) && ...
+                        isvalid(app.LiveMonitorFigure)
+                    close(app.LiveMonitorFigure);
                 end
 
                 app.StatusLabel.Text = 'Status: Experiment Error!';
@@ -494,6 +509,118 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
         end
 
+        % --- Create the Live Monitor window ---
+        function CreateLiveMonitorWindow(app)
+
+            if ~isempty(app.LiveMonitorFigure) && ...
+                    isvalid(app.LiveMonitorFigure)
+                close(app.LiveMonitorFigure);
+            end
+
+            app.LiveMonitorFigure = uifigure( ...
+                'Name', 'WDS Optimizer - Live Monitor', ...
+                'Position', [250 150 850 520], ...
+                'CloseRequestFcn', ...
+                @(src, evt) app.OnLiveMonitorCloseRequest());
+
+            g = uigridlayout(app.LiveMonitorFigure, [2 1]);
+            g.RowHeight = {45, '1x'};
+            g.Padding = [10 10 10 10];
+            g.RowSpacing = 8;
+
+            app.LiveMonitorStatusLabel = uilabel(g, ...
+                'Text', 'Preparing experiment...', ...
+                'FontWeight', 'bold', ...
+                'WordWrap', 'on');
+            app.LiveMonitorStatusLabel.Layout.Row = 1;
+            app.LiveMonitorStatusLabel.Layout.Column = 1;
+
+            app.LiveRunAxes = uiaxes(g);
+            app.LiveRunAxes.Layout.Row = 2;
+            app.LiveRunAxes.Layout.Column = 1;
+
+            title(app.LiveRunAxes, 'Current Run Convergence');
+            xlabel(app.LiveRunAxes, 'Generation / Iteration');
+            ylabel(app.LiveRunAxes, 'Best Cost');
+            grid(app.LiveRunAxes, 'on');
+
+            cla(app.LiveRunAxes, 'reset');
+            app.LiveConvergenceLine = plot( ...
+                app.LiveRunAxes, nan, nan, 'LineWidth', 2);
+
+            title(app.LiveRunAxes, 'Current Run Convergence');
+            xlabel(app.LiveRunAxes, 'Generation / Iteration');
+            ylabel(app.LiveRunAxes, 'Best Cost');
+            grid(app.LiveRunAxes, 'on');
+
+            drawnow;
+        end
+
+        % --- Handle Live Monitor window closure ---
+        function OnLiveMonitorCloseRequest(app)
+
+            if ~isempty(app.LiveMonitorFigure) && ...
+                    isvalid(app.LiveMonitorFigure)
+                delete(app.LiveMonitorFigure);
+            end
+
+        end
+
+        % --- Safely update Live Monitor status ---
+        function UpdateLiveMonitorStatus(app, StatusText)
+
+            if isempty(app.LiveMonitorFigure) || ...
+                    ~isvalid(app.LiveMonitorFigure) || ...
+                    isempty(app.LiveMonitorStatusLabel) || ...
+                    ~isvalid(app.LiveMonitorStatusLabel)
+                return;
+            end
+
+            app.LiveMonitorStatusLabel.Text = StatusText;
+
+            drawnow limitrate;
+        end
+
+        % --- Receive live progress reports ---
+        function UpdateLiveMonitor(app, ProgressInfo)
+
+            if isempty(app.LiveMonitorFigure) || ...
+                    ~isvalid(app.LiveMonitorFigure) || ...
+                    isempty(app.LiveMonitorStatusLabel) || ...
+                    ~isvalid(app.LiveMonitorStatusLabel) || ...
+                    isempty(app.LiveRunAxes) || ...
+                    ~isvalid(app.LiveRunAxes) || ...
+                    isempty(app.LiveConvergenceLine) || ...
+                    ~isvalid(app.LiveConvergenceLine)
+                return;
+            end
+
+            if ProgressInfo.Feasible
+                FeasibilityText = 'Feasible';
+            else
+                FeasibilityText = 'Infeasible';
+            end
+
+            app.LiveMonitorStatusLabel.Text = sprintf( ...
+                '%s | Generation %d/%d | Best cost: %.2f | %s', ...
+                ProgressInfo.RunLabel, ...
+                ProgressInfo.Generation, ...
+                ProgressInfo.MaxGenerations, ...
+                ProgressInfo.BestCost, ...
+                FeasibilityText);
+
+            app.LiveConvergenceLine.XData = 1:ProgressInfo.Generation;
+            app.LiveConvergenceLine.YData = ProgressInfo.Convergence;
+
+            if strcmp(ProgressInfo.Algorithm, 'GA')
+                app.LiveConvergenceLine.Color = [1 0 0];  % Red
+            elseif strcmp(ProgressInfo.Algorithm, 'PSO')
+                app.LiveConvergenceLine.Color = [0 0 1];  % Blue
+            end
+
+            drawnow limitrate;
+
+        end
 
         % --- Environment Setup Helper ---
         function [d, tempInpPath, Problem, Config] = PrepareEnvironment(app)

@@ -36,6 +36,21 @@ function ExperimentResult = runExperiment( ...
         end
     end
 
+    % Optional callback for experiment-level progress reporting.
+    ProgressCallback = [];
+
+    if isfield(ExperimentOptions, 'ProgressCallback') && ...
+            ~isempty(ExperimentOptions.ProgressCallback)
+
+        if ~isa(ExperimentOptions.ProgressCallback, 'function_handle')
+            error('runExperiment:InvalidProgressCallback', ...
+                'ExperimentOptions.ProgressCallback must be a function handle.');
+        end
+
+        ProgressCallback = ExperimentOptions.ProgressCallback;
+
+    end
+
     NumberOfRuns = ExperimentOptions.NumberOfRuns;
 
     if ~isnumeric(NumberOfRuns) || ...
@@ -181,14 +196,9 @@ function ExperimentResult = runExperiment( ...
 
     %% Execute each selected algorithm
 
-    ExperimentCompletedSuccessfully = true;
-
     for a = 1:numel(SelectedAlgorithms)
 
         Algorithm = SelectedAlgorithms{a};
-
-        fprintf('\nStarting %s experiment: %d runs.\n', ...
-            Algorithm, NumberOfRuns);
 
         RunTemplate = struct( ...
             'Algorithm', '', ...
@@ -208,9 +218,6 @@ function ExperimentResult = runExperiment( ...
 
         for r = 1:NumberOfRuns
 
-            fprintf('%s run %d/%d, seed = %.0f\n', ...
-                Algorithm, r, NumberOfRuns, RunSeeds(r));
-
             % Resolve this run's cache before starting the timer.
             [RunCache, SharedCache] = ...
                 resolveExperimentCache(CacheMode, SharedCache);
@@ -219,6 +226,14 @@ function ExperimentResult = runExperiment( ...
             RunConfig = Config;
             RunConfig.Seed = RunSeeds(r);
             RunConfig.Cache = RunCache;
+
+            % Attach experiment-level progress reporting when requested.
+            if ~isempty(ProgressCallback)
+                RunConfig.ProgressCallback = ...
+                    @(ProgressInfo) reportExperimentProgress( ...
+                        ProgressCallback, ProgressInfo, ...
+                        Algorithm, r, NumberOfRuns);
+            end
 
             % Initialize this run's result metadata before execution.
             Runs(r).Algorithm = Algorithm;
@@ -301,10 +316,6 @@ function ExperimentResult = runExperiment( ...
             aggregateConvergenceData(Runs);
 
         if StopExperiment
-            ExperimentCompletedSuccessfully = false;
-
-            fprintf(['Stopping experiment after failure in parallel ' ...
-                'execution of %s.\n'], Algorithm);
 
             % Record algorithms that will not be started.
             for nextA = a + 1:numel(SelectedAlgorithms)
@@ -339,16 +350,20 @@ function ExperimentResult = runExperiment( ...
 
         end
 
-        fprintf('Completed %s: %d/%d runs successful.\n', Algorithm, ...
-            ExperimentResult.Results.(Algorithm).Statistics.SuccessfulRuns, ...
-            NumberOfRuns);
-
     end
 
-    if ExperimentCompletedSuccessfully
-        fprintf('\nExperiment completed successfully.\n');
-    else
-        fprintf('\nExperiment stopped before all algorithms completed.\n');
-    end
+end
+
+function reportExperimentProgress( ...
+    Callback, ProgressInfo, Algorithm, RunIndex, NumberOfRuns)
+
+    ProgressInfo.Algorithm = Algorithm;
+    ProgressInfo.RunIndex = RunIndex;
+    ProgressInfo.NumberOfRuns = NumberOfRuns;
+
+    ProgressInfo.RunLabel = sprintf( ...
+        '%s run %d/%d', Algorithm, RunIndex, NumberOfRuns);
+
+    Callback(ProgressInfo);
 
 end

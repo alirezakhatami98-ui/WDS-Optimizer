@@ -1,4 +1,4 @@
-function RunsTable = createRunsTable(ExperimentResult, BestAlgorithm, BestRunIndex)
+function RunsTable = createRunsTable(ExperimentResult, ~, ~)
 %CREATERUNSTABLE One row per run of every algorithm in the experiment.
 
     Algorithms = ExperimentResult.Configuration.Algorithms;
@@ -13,6 +13,7 @@ function RunsTable = createRunsTable(ExperimentResult, BestAlgorithm, BestRunInd
     Run = zeros(Total, 1);
     Seed = cell(Total, 1);
     Cost = nan(Total, 1);
+    RawCost = nan(Total, 1);
     Feasible = cell(Total, 1);
     Time_s = nan(Total, 1);
     Status = cell(Total, 1);
@@ -41,6 +42,7 @@ function RunsTable = createRunsTable(ExperimentResult, BestAlgorithm, BestRunInd
                     isnumeric(R.Score) && isscalar(R.Score)
 
                 Cost(row) = round(R.Score, 2);
+                RawCost(row) = R.Score;
 
                 if R.Feasible
                     Feasible{row} = 'Yes';
@@ -52,11 +54,21 @@ function RunsTable = createRunsTable(ExperimentResult, BestAlgorithm, BestRunInd
                 Feasible{row} = '-';
             end
 
-            if strcmp(Algorithms{a}, BestAlgorithm) && r == BestRunIndex
-                Best{row} = 'Best';
-            end
-
         end
+    end
+
+    % Mark all feasible runs with the minimum actual cost as Best.
+    SuccessfulRows = strcmp(Status, 'Success');
+    FeasibleRows = strcmp(Feasible, 'Yes');
+
+    CandidateRows = SuccessfulRows & FeasibleRows & ...
+        isfinite(RawCost);
+
+    if any(CandidateRows)
+        MinimumCost = min(RawCost(CandidateRows));
+
+        BestRows = CandidateRows & (RawCost == MinimumCost);
+        Best(BestRows) = {'Best'};
     end
 
     RunsTable = table( ...
