@@ -6,3 +6,6 @@
 # EPANET temporary files
 temp_network*.inp
 temp_network*.txt
+
+# studies
+studies/results/
