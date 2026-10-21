@@ -6,6 +6,21 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
         rng(Config.Seed);
     end
 
+    % Optional callback for cooperative cancellation.
+    CancelCallback = [];
+
+    if isfield(Config, 'CancelCallback') && ...
+            ~isempty(Config.CancelCallback)
+
+        if ~isa(Config.CancelCallback, 'function_handle')
+            error('runGA:InvalidCancelCallback', ...
+                'Config.CancelCallback must be a function handle.');
+        end
+
+        CancelCallback = Config.CancelCallback;
+
+    end
+
     NS = Config.NS;
     MaxGen = Config.MaxGen;
 
@@ -32,6 +47,21 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
 
     Pc = Config.GA.Pc;
     Pm = Config.GA.Pm;
+
+    selectionMethod = 'roulette';
+    if isfield(Config.GA, 'Selection') && ~isempty(Config.GA.Selection)
+        selectionMethod = lower(Config.GA.Selection);
+    end
+
+    if ~ismember(selectionMethod, {'roulette', 'tournament'})
+        error('runGA:InvalidSelection', ...
+            'Config.GA.Selection must be ''roulette'' or ''tournament''.');
+    end
+
+    tournamentSize = 3;
+    if isfield(Config.GA, 'TournamentSize') && ~isempty(Config.GA.TournamentSize)
+        tournamentSize = Config.GA.TournamentSize;
+    end
 
     ND = numel(Problem.D);
     NVar = numel(Problem.VariablePipes);
@@ -64,9 +94,20 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
 
     for G = 1:MaxGen
 
-        Fitness = calculateFitness(cost, viol);
+        % Check for a cancellation request at a safe checkpoint.
+        if ~isempty(CancelCallback) && CancelCallback()
+            error('runGA:Cancelled', ...
+                'GA execution was cancelled by the user.');
+        end
 
-        SelectedIdx = selectionRoulette(Fitness, NS);
+        switch selectionMethod
+            case 'tournament'
+                SelectedIdx = selectionTournament( ...
+                    cost, viol, NS, tournamentSize);
+            otherwise
+                Fitness = calculateFitness(cost, viol);
+                SelectedIdx = selectionRoulette(Fitness, NS);
+        end
         MatingPool = Pop(:, SelectedIdx);
 
         NewPop = MatingPool;

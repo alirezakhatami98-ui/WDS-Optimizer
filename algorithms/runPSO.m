@@ -6,6 +6,21 @@ function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
         rng(Config.Seed);
     end
 
+    % Optional callback for cooperative cancellation.
+    CancelCallback = [];
+
+    if isfield(Config, 'CancelCallback') && ...
+            ~isempty(Config.CancelCallback)
+
+        if ~isa(Config.CancelCallback, 'function_handle')
+            error('runPSO:InvalidCancelCallback', ...
+                'Config.CancelCallback must be a function handle.');
+        end
+
+        CancelCallback = Config.CancelCallback;
+
+    end
+
     N = Config.NS;
     MaxGen = Config.MaxGen;
 
@@ -62,6 +77,12 @@ function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
     Conv = zeros(MaxGen, 1);
 
     for G = 1:MaxGen
+
+        % Check for a cancellation request at a safe checkpoint.
+        if ~isempty(CancelCallback) && CancelCallback()
+            error('runPSO:Cancelled', ...
+                'PSO execution was cancelled by the user.');
+        end
 
         X_discrete = round(X);
         X_discrete = max(1, min(ND, X_discrete));

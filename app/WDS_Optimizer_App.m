@@ -77,6 +77,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         NodePressures
         PipeVelocities
         ExperimentResult
+        CancelRequested logical = false
+        ExperimentRunning = false
 
         % Experiment settings window
         ExperimentSettingsFigure
@@ -199,8 +201,14 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 return;
             end
 
+            app.CancelRequested = false;
+            app.ExperimentRunning = true;
             app.StatusLabel.Text = 'Status: Running Experiment...';
-            app.RunButton.Enable = 'off';
+
+            app.RunButton.Text = 'Cancel Experiment';
+            app.RunButton.BackgroundColor = [0.85 0.15 0.15];
+            app.RunButton.FontColor = 'w';
+            app.RunButton.Enable = 'on';
             app.ExportButton.Enable = 'off';
 
             app.CreateLiveMonitorWindow();
@@ -263,6 +271,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 ExperimentOptions.ProgressCallback = ...
                     @(ProgressInfo) app.UpdateLiveMonitor(ProgressInfo);
+
+                ExperimentOptions.CancelCallback = ...
+                    @() app.CancelRequested;
 
                 drawnow;
 
@@ -348,10 +359,20 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 if isempty(CandidateScores)
 
-                    error( ...
-                        'WDSOptimizer:NoSuccessfulRuns', ...
-                        ['No successful experiment runs are available. ' ...
-                        'Check the reported run errors and try again.']);
+                    if app.CancelRequested
+
+                        error( ...
+                            'WDSOptimizer:ExperimentCancelled', ...
+                            'Experiment cancelled by user.');
+
+                    else
+
+                        error( ...
+                            'WDSOptimizer:NoSuccessfulRuns', ...
+                            ['No successful experiment runs are available. ' ...
+                            'Check the reported run errors and try again.']);
+
+                    end
 
                 end
 
@@ -410,6 +431,11 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     Problem, ...
                     BestRun.Feasible);
 
+                if app.CancelRequested
+                    app.StatusLabel.Text = ...
+                        'Status: Experiment cancelled. Successful results preserved.';
+                end
+
                 cleanupEpanetObject(d);
                 d = [];
 
@@ -420,6 +446,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 TotalRuns = 0;
                 SuccessfulRuns = 0;
                 FailedRuns = 0;
+                CancelledRuns = 0;
                 NotStartedRuns = 0;
 
                 for a = 1:numel(ExperimentAlgorithms)
@@ -436,12 +463,23 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     FailedRuns = FailedRuns + ...
                         sum(strcmp({Runs.Status}, 'Failed'));
 
+                    CancelledRuns = CancelledRuns + ...
+                        sum(strcmp({Runs.Status}, 'Cancelled'));
+
                     NotStartedRuns = NotStartedRuns + ...
                         sum(strcmp({Runs.Status}, 'NotStarted'));
 
                 end
 
-                if SuccessfulRuns == TotalRuns
+                if app.CancelRequested
+
+                    app.StatusLabel.Text = sprintf( ...
+                        ['Experiment cancelled: %d/%d succeeded, ' ...
+                         '%d cancelled, %d failed, %d not started.'], ...
+                        SuccessfulRuns, TotalRuns, ...
+                        CancelledRuns, FailedRuns, NotStartedRuns);
+
+                elseif SuccessfulRuns == TotalRuns
 
                     app.StatusLabel.Text = sprintf( ...
                         'Experiment completed: %d/%d runs succeeded.', ...
@@ -450,9 +488,10 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 else
 
                     app.StatusLabel.Text = sprintf( ...
-                        'Experiment finished: %d/%d succeeded, %d failed, %d not started.', ...
+                        ['Experiment finished: %d/%d succeeded, ' ...
+                         '%d failed, %d cancelled, %d not started.'], ...
                         SuccessfulRuns, TotalRuns, ...
-                        FailedRuns, NotStartedRuns);
+                        FailedRuns, CancelledRuns, NotStartedRuns);
 
                 end
 
@@ -461,7 +500,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     close(app.LiveMonitorFigure);
                 end
 
-                if ~Converged
+                if ~Converged && ~app.CancelRequested
 
                     uialert( ...
                         app.UIFigure, ...
@@ -496,16 +535,53 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     close(app.LiveMonitorFigure);
                 end
 
-                app.StatusLabel.Text = 'Status: Experiment Error!';
+                if strcmp(ME.identifier, ...
+                        'WDSOptimizer:ExperimentCancelled')
 
-                uialert( ...
-                    app.UIFigure, ...
-                    ME.message, ...
-                    'Experiment Execution Error');
+                    app.StatusLabel.Text = ...
+                        'Status: Experiment Cancelled.';
+
+                else
+
+                    app.StatusLabel.Text = 'Status: Experiment Error!';
+
+                    uialert( ...
+                        app.UIFigure, ...
+                        ME.message, ...
+                        'Experiment Execution Error');
+
+                end
 
             end
 
+            app.ExperimentRunning = false;
+            app.CancelRequested = false;
+
+            app.RunButton.Text = 'Run Experiment';
+            app.RunButton.BackgroundColor = [0.1 0.6 0.2];
+            app.RunButton.FontColor = 'w';
             app.RunButton.Enable = 'on';
+
+        end
+
+        function OnRunButtonPressed(app)
+
+            if app.ExperimentRunning
+
+                app.CancelRequested = true;
+
+                app.RunButton.Enable = 'off';
+
+                app.StatusLabel.Text = ...
+                    'Status: Cancellation requested...';
+
+                drawnow;
+
+            else
+
+                app.RunOptimization([]);
+
+            end
 
         end
 
@@ -1348,7 +1424,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 'FontColor', 'w', ...
                 'FontSize', 13, ...
                 'FontWeight', 'bold', ...
-                'ButtonPushedFcn', @(btn, e) RunOptimization(app, e));
+                'ButtonPushedFcn', ...
+                    @(btn, e) app.OnRunButtonPressed());
             placeIn(app.RunButton, 5, 1);
 
             app.ExportButton = uibutton(LeftGrid, 'push', ...

@@ -51,6 +51,21 @@ function ExperimentResult = runExperiment( ...
 
     end
 
+    % Optional callback for cooperative cancellation.
+    CancelCallback = [];
+
+    if isfield(ExperimentOptions, 'CancelCallback') && ...
+            ~isempty(ExperimentOptions.CancelCallback)
+
+        if ~isa(ExperimentOptions.CancelCallback, 'function_handle')
+            error('runExperiment:InvalidCancelCallback', ...
+                'ExperimentOptions.CancelCallback must be a function handle.');
+        end
+
+        CancelCallback = ExperimentOptions.CancelCallback;
+
+    end
+
     NumberOfRuns = ExperimentOptions.NumberOfRuns;
 
     if ~isnumeric(NumberOfRuns) || ...
@@ -215,6 +230,7 @@ function ExperimentResult = runExperiment( ...
         Runs = repmat(RunTemplate, NumberOfRuns, 1);
 
         StopExperiment = false;
+        StopReason = '';
 
         for r = 1:NumberOfRuns
 
@@ -233,6 +249,10 @@ function ExperimentResult = runExperiment( ...
                     @(ProgressInfo) reportExperimentProgress( ...
                         ProgressCallback, ProgressInfo, ...
                         Algorithm, r, NumberOfRuns);
+            end
+
+            if ~isempty(CancelCallback)
+                RunConfig.CancelCallback = CancelCallback;
             end
 
             % Initialize this run's result metadata before execution.
@@ -266,27 +286,46 @@ function ExperimentResult = runExperiment( ...
                 Runs(r).ExecutionTime = ExecutionTime;
                 Runs(r).Conv = Conv;
                 Runs(r).Status = 'Success';
-
+           
             catch ME
 
                 ExecutionTime = toc(timerStart);
 
-                % Preserve failure information without aborting
-                % the remaining sequential runs.
+                % Preserve execution information.
                 Runs(r).ExecutionTime = ExecutionTime;
-                Runs(r).Status = 'Failed';
                 Runs(r).ErrorMessage = ME.message;
 
-                warning('runExperiment:RunFailed', ...
-                    '%s run %d/%d failed: %s', ...
-                    Algorithm, r, NumberOfRuns, ME.message);
+                % Distinguish cooperative cancellation from actual failures.
+                IsCancelled = strcmp(ME.identifier, 'runGA:Cancelled') || ...
+                              strcmp(ME.identifier, 'runPSO:Cancelled');
 
-                if isfield(Config, 'Parallel') && ...
-                        isfield(Config.Parallel, 'Enabled') && ...
-                        Config.Parallel.Enabled
+                if IsCancelled
 
+                    Runs(r).Status = 'Cancelled';
+
+                    % Stop the remaining runs and algorithms.
                     StopExperiment = true;
+                    StopReason = 'cancelled';
                     break;
+
+                else
+
+                    % Preserve existing failure handling.
+                    Runs(r).Status = 'Failed';
+
+                    warning('runExperiment:RunFailed', ...
+                        '%s run %d/%d failed: %s', ...
+                        Algorithm, r, NumberOfRuns, ME.message);
+
+                    if isfield(Config, 'Parallel') && ...
+                            isfield(Config.Parallel, 'Enabled') && ...
+                            Config.Parallel.Enabled
+
+                        StopExperiment = true;
+                        StopReason = 'parallel failure';
+                        break;
+
+                    end
 
                 end
 
@@ -302,8 +341,22 @@ function ExperimentResult = runExperiment( ...
                 Runs(r).Algorithm = Algorithm;
                 Runs(r).RunIndex = r;
                 Runs(r).Seed = RunSeeds(r);
-                Runs(r).ErrorMessage = ...
-                    'Run not started because the experiment stopped after a parallel execution failure.';
+                if strcmp(StopReason, 'cancelled')
+
+                    Runs(r).ErrorMessage = ...
+                        'Run not started because the experiment was cancelled.';
+
+                elseif strcmp(StopReason, 'parallel failure')
+
+                    Runs(r).ErrorMessage = ...
+                        'Run not started because the experiment stopped after a parallel execution failure.';
+
+                else
+
+                    Runs(r).ErrorMessage = ...
+                        'Run not started.';
+
+                end
             end
         end
 
