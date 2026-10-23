@@ -101,6 +101,16 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         NetworkUnitsLabel     matlab.ui.control.Label
         NetworkUnits
         ResultUnits
+
+        % Persistence (Experiment Save/Load)
+        LastProblem         struct = struct()
+        LastConfig          struct = struct()
+        LastBestAlgorithm   char = ''
+        LastBestRunIndex    double = 0
+        HydraulicsConverged logical = false
+        LastExperimentSaved logical = true
+        SaveButton          matlab.ui.control.Button
+        LoadButton          matlab.ui.control.Button
     end
 
     methods (Access = private)
@@ -205,11 +215,25 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.ExperimentRunning = true;
             app.StatusLabel.Text = 'Status: Running Experiment...';
 
+            % Warn about unsaved previous experiment
+            if ~app.LastExperimentSaved && ~isempty(app.ExperimentResult)
+                choice = uiconfirm(app.UIFigure, ...
+                    ['The current experiment has not been saved. ' ...
+                    'Starting a new run will discard it. Continue?'], ...
+                    'Unsaved Experiment', ...
+                    'Options', {'Continue', 'Cancel'}, ...
+                    'DefaultOption', 2, 'CancelOption', 2);
+                if strcmp(choice, 'Cancel')
+                    return;
+                end
+            end
+
             app.RunButton.Text = 'Cancel Experiment';
             app.RunButton.BackgroundColor = [0.85 0.15 0.15];
             app.RunButton.FontColor = 'w';
             app.RunButton.Enable = 'on';
             app.ExportButton.Enable = 'off';
+            app.SaveButton.Enable = 'off';
 
             app.CreateLiveMonitorWindow();
             drawnow;
@@ -424,12 +448,11 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 %% 9. Update hydraulic results and check convergence
 
-                Converged = app.UpdateGUIResults( ...
-                    d, ...
-                    BestRun.Score, ...
-                    BestRun.Position, ...
-                    Problem, ...
-                    BestRun.Feasible);
+                Hydraulics = app.ComputeHydraulicResults(d, BestRun.Position, Problem);
+                app.DisplayResults(BestRun.Score, BestRun.Position, Problem, ...
+                    Hydraulics, BestRun.Feasible);
+
+                Converged = Hydraulics.Converged;
 
                 if app.CancelRequested
                     app.StatusLabel.Text = ...
@@ -514,6 +537,14 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 app.ExportButton.Enable = 'on';
 
+                app.LastProblem         = Problem;
+                app.LastConfig          = Config;
+                app.LastBestAlgorithm   = BestAlgorithm;
+                app.LastBestRunIndex    = BestRunIndex;
+                app.HydraulicsConverged = Converged;
+                app.LastExperimentSaved = false;
+                app.SaveButton.Enable   = 'on';
+
             catch ME
 
                 if parallelInitialized || ...
@@ -555,6 +586,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             end
 
             app.ExperimentRunning = false;
+            app.LoadButton.Enable = 'on';
             app.CancelRequested = false;
 
             app.RunButton.Text = 'Run Experiment';
@@ -567,20 +599,15 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         function OnRunButtonPressed(app)
 
             if app.ExperimentRunning
-
                 app.CancelRequested = true;
-
                 app.RunButton.Enable = 'off';
-
-                app.StatusLabel.Text = ...
-                    'Status: Cancellation requested...';
-
+                app.LoadButton.Enable = 'off';      % جدید
+                app.StatusLabel.Text = 'Status: Cancellation requested...';
                 drawnow;
-
             else
-
+                app.LoadButton.Enable = 'off';      % جدید
                 app.RunOptimization([]);
-
+                app.LoadButton.Enable = 'on';       % جدید
             end
 
         end
@@ -916,22 +943,26 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
         end
 
-        % --- Best-design hydraulic results ---
-        function Converged = UpdateGUIResults(app, d, Score, Position, Problem, Feasible)
-            app.BestCost = Score;
-            app.OptimalDiameters = Position';
+        % --- Hydraulic computation (no UI side effects) ---
+        function Hydraulics = ComputeHydraulicResults(~, d, Position, Problem)
 
-            [app.NodePressures, app.PipeVelocities, Converged] = ...
-                calculateHydraulicResults(d, app.OptimalDiameters, Problem.NP);
+            [Hydraulics.NodePressures, Hydraulics.PipeVelocities, ...
+                Hydraulics.Converged] = ...
+                calculateHydraulicResults(d, Position(:), Problem.NP);
+        end
+
+        % --- UI display only (no d, no hydraulics computation) ---
+        function DisplayResults(app, Score, Position, Problem, Hydraulics, Feasible)
+
+            app.BestCost          = Score;
+            app.OptimalDiameters  = Position(:)';
+            app.NodePressures     = Hydraulics.NodePressures;
+            app.PipeVelocities    = Hydraulics.PipeVelocities;
 
             % Best Design tab
             app.ResultUnits = Problem.Units;
-
             app.UITablePipes.Data = createPipeResultsTable( ...
-                Problem.NP, ...
-                app.OptimalDiameters, ...
-                app.PipeVelocities, ...
-                Problem.Units);
+                Problem.NP, app.OptimalDiameters, app.PipeVelocities, Problem.Units);
 
             if Feasible
                 app.CostSummaryLabel.Text = ...
@@ -945,9 +976,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             % Hydraulic Results tab
             app.UITableNodes.Data = createNodeResultsTable( ...
-                app.NodePressures, ...
-                Problem.Pmin, ...
-                Problem.Units);
+                app.NodePressures, Problem.Pmin, Problem.Units);
             U = Problem.Units;
 
             app.NodeStatusLabel.Text = sprintf( ...
@@ -957,15 +986,19 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             numNodes = numel(app.NodePressures);
 
-            bar(app.PressureAxes, 1:numNodes, app.NodePressures, 0.6, 'FaceColor', [0 0.45 0.74]);
+            bar(app.PressureAxes, 1:numNodes, app.NodePressures, 0.6, ...
+                'FaceColor', [0 0.45 0.74]);
             yline(app.PressureAxes, Problem.Pmin, '--r', ...
-                sprintf('Pmin (%.1f %s)', Problem.Pmin, U.PressureUnit), 'LineWidth', 1.5);
+                sprintf('Pmin (%.1f %s)', Problem.Pmin, U.PressureUnit), ...
+                'LineWidth', 1.5);
             ylabel(app.PressureAxes, sprintf('Pressure (%s)', U.PressureUnit));
             grid(app.PressureAxes, 'on');
 
-            bar(app.VelocityAxes, 1:Problem.NP, app.PipeVelocities, 0.6, 'FaceColor', [0.47 0.67 0.19]);
+            bar(app.VelocityAxes, 1:Problem.NP, app.PipeVelocities, 0.6, ...
+                'FaceColor', [0.47 0.67 0.19]);
             yline(app.VelocityAxes, Problem.Vmax, '--r', ...
-                sprintf('Vmax (%.1f %s)', Problem.Vmax, U.VelocityUnit), 'LineWidth', 1.5);
+                sprintf('Vmax (%.1f %s)', Problem.Vmax, U.VelocityUnit), ...
+                'LineWidth', 1.5);
             ylabel(app.VelocityAxes, sprintf('Velocity (%s)', U.VelocityUnit));
             grid(app.VelocityAxes, 'on');
         end
@@ -1269,6 +1302,228 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
         end
 
+        % --- Save current experiment to .wdsx ---
+        function SaveExperiment(app)
+
+            if isempty(app.ExperimentResult) || isempty(app.LastProblem) || ...
+                    isempty(app.LastBestAlgorithm)
+
+                uialert(app.UIFigure, ...
+                    'There is no completed experiment to save.', ...
+                    'Nothing to Save');
+                return;
+            end
+
+            % Warn if settings differ from what was actually run
+            C = app.ExperimentResult.Configuration;
+            SettingsChanged = ...
+                C.NS ~= app.NSEditField.Value || ...
+                C.MaxGen ~= app.MaxGenEditField.Value || ...
+                C.ExperimentSeed ~= app.ExperimentSettings.ExperimentSeed;
+
+            if SettingsChanged
+                choice = uiconfirm(app.UIFigure, ...
+                    ['Settings have changed since the last run. ' ...
+                    'The saved file will contain the current settings ' ...
+                    'paired with the previous results. Save anyway?'], ...
+                    'Settings Mismatch', ...
+                    'Options', {'Save Anyway', 'Cancel'}, ...
+                    'DefaultOption', 2, 'CancelOption', 2);
+
+                if strcmp(choice, 'Cancel')
+                    return;
+                end
+            end
+
+            [file, path] = uiputfile('*.wdsx', 'Save Experiment', ...
+                sprintf('WDS_Exp_%s.wdsx', ...
+                    char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'))));
+
+            if ~ischar(file)
+                return;
+            end
+
+            fullPath = fullfile(path, file);
+
+            try
+                SavedExperiment = app.BuildExperimentSnapshot(); 
+                save(fullPath, 'SavedExperiment', '-v7.3', '-mat');
+
+                app.LastExperimentSaved = true;
+                app.StatusLabel.Text = sprintf( ...
+                    'Status: Experiment saved to %s.', file);
+
+            catch ME
+                uialert(app.UIFigure, ME.message, 'Save Error');
+            end
+        end
+
+        % --- Load an experiment from .wdsx ---
+        function LoadExperiment(app)
+
+            if app.ExperimentRunning
+                uialert(app.UIFigure, ...
+                    'Cancel the running experiment first.', ...
+                    'Cannot Load');
+                return;
+            end
+
+            if ~app.LastExperimentSaved && ~isempty(app.ExperimentResult)
+                choice = uiconfirm(app.UIFigure, ...
+                    ['The current experiment has not been saved. ' ...
+                    'Loading a new one will discard it. Continue?'], ...
+                    'Unsaved Experiment', ...
+                    'Options', {'Continue', 'Cancel'}, ...
+                    'DefaultOption', 2, 'CancelOption', 2);
+
+                if strcmp(choice, 'Cancel')
+                    return;
+                end
+            end
+
+            [file, path] = uigetfile('*.wdsx', 'Load Experiment');
+            if ~ischar(file)
+                return;
+            end
+
+            try
+                S = load(fullfile(path, file), '-mat');
+                if ~isfield(S, 'SavedExperiment')
+                    error('WDS:InvalidFile', ...
+                        'The selected file is not a WDS Optimizer experiment.');
+                end
+                Exp = S.SavedExperiment;
+
+                validateSavedExperiment(Exp);
+                app.ApplyLoadedExperiment(Exp, file);
+
+            catch ME
+                uialert(app.UIFigure, ME.message, 'Load Error');
+            end
+        end
+
+        % --- Restore app state from a loaded experiment ---
+        function ApplyLoadedExperiment(app, Exp, fileName)
+
+            % 1. Restore input files to a fresh temp folder
+            [inpPath, dPath, costPath] = restoreInputFiles(Exp.Environment);
+
+            app.InpFileStr  = inpPath;
+            app.DFileStr    = dPath;
+            app.CostFileStr = costPath;
+
+            app.INPLabel.Text  = sprintf('%s (loaded)', Exp.Environment.InpFileName);
+            app.DLabel.Text    = sprintf('%s (loaded)', Exp.Environment.DFileName);
+            app.CostLabel.Text = sprintf('%s (loaded)', Exp.Environment.CostFileName);
+
+            % 2. Restore UI input fields from the saved experiment
+            app.HeadlossDropDown.Value = Exp.Environment.Headloss;
+            app.DUnitDropDown.Value    = Exp.Environment.DUnit;
+
+            app.PminEditField.Value       = Exp.Problem.Pmin;
+            app.VmaxEditField.Value       = Exp.Problem.Vmax;
+            app.NSEditField.Value         = Exp.Config.NS;
+            app.MaxGenEditField.Value     = Exp.Config.MaxGen;
+            app.FixedPipesEditField.Value = formatPipeList(Exp.Problem.FixedPipes);
+
+            app.ExperimentSettings = Exp.Settings;
+            app.RefreshExperimentSettingsLabel();
+
+            % 3. Restore units labels (from saved Problem)
+            app.NetworkUnits = Exp.Problem.Units;
+            app.ApplyUnitLabels();
+
+            % 4. Restore internal state
+            app.LastProblem         = Exp.Problem;
+            app.LastConfig          = Exp.Config;
+            app.LastBestAlgorithm   = Exp.Best.Algorithm;
+            app.LastBestRunIndex    = Exp.Best.RunIndex;
+            app.ExperimentResult    = Exp.ExperimentResult;
+            app.HydraulicsConverged = Exp.Hydraulics.Converged;
+
+            % 5. Repopulate UI without re-running anything
+            app.UpdateExperimentSummary(Exp.ExperimentResult, ...
+                Exp.Best.Algorithm, Exp.Best.RunIndex);
+
+            BestRun = Exp.ExperimentResult.Results.( ...
+                Exp.Best.Algorithm).Runs(Exp.Best.RunIndex);
+
+            app.PlotBestRunConvergence(Exp.Best.Algorithm, ...
+                Exp.Best.RunIndex, BestRun);
+
+            app.DisplayResults(Exp.Best.Score, Exp.Best.Position, ...
+                Exp.Problem, Exp.Hydraulics, Exp.Best.Feasible);
+
+            % 6. Update state flags
+            app.LastExperimentSaved = true;
+            app.ExportButton.Enable = 'on';
+            app.SaveButton.Enable   = 'on';
+            app.StatusLabel.Text = sprintf( ...
+                'Status: Loaded "%s" (saved %s).', fileName, ...
+                char(Exp.Timestamp));
+        end
+
+        % --- Build a saveable snapshot of the current experiment state ---
+        function Exp = BuildExperimentSnapshot(app)
+
+            Exp = struct();
+            Exp.FormatVersion = 1;
+            Exp.AppVersion    = '1.7.0';
+            Exp.Timestamp     = datetime('now');
+
+            % ---- Environment ----
+            inpContent  = readFileContent(app.InpFileStr);
+            dContent    = readFileContent(app.DFileStr);
+            costContent = readFileContent(app.CostFileStr);
+
+            [~, inpBase,  inpExt]  = fileparts(app.InpFileStr);
+            [~, dBase,    dExt]    = fileparts(app.DFileStr);
+            [~, costBase, costExt] = fileparts(app.CostFileStr);
+
+            Exp.Environment.InpFileName     = [inpBase  inpExt];
+            Exp.Environment.InpFilePath     = app.InpFileStr;
+            Exp.Environment.InpFileContent  = inpContent;
+            Exp.Environment.InpFileHash     = computeStringHash(inpContent);
+
+            Exp.Environment.DFileName       = [dBase dExt];
+            Exp.Environment.DFilePath       = app.DFileStr;
+            Exp.Environment.DFileContent    = dContent;
+            Exp.Environment.DFileHash       = computeStringHash(dContent);
+
+            Exp.Environment.CostFileName    = [costBase costExt];
+            Exp.Environment.CostFilePath    = app.CostFileStr;
+            Exp.Environment.CostFileContent = costContent;
+            Exp.Environment.CostFileHash    = computeStringHash(costContent);
+
+            Exp.Environment.DUnit    = app.DUnitDropDown.Value;
+            Exp.Environment.Headloss = app.HeadlossDropDown.Value;
+
+            % ---- Settings + Config ----
+            Exp.Settings = app.ExperimentSettings;
+            Exp.Config   = sanitizeConfigForSave(app.LastConfig);
+
+            % ---- Problem ----
+            Exp.Problem  = app.LastProblem;
+
+            % ---- ExperimentResult ----
+            Exp.ExperimentResult = app.ExperimentResult;
+
+            % ---- Best ----
+            BestRun = Exp.ExperimentResult.Results.(app.LastBestAlgorithm)...
+                .Runs(app.LastBestRunIndex);
+
+            Exp.Best.Algorithm = app.LastBestAlgorithm;
+            Exp.Best.RunIndex  = app.LastBestRunIndex;
+            Exp.Best.Score     = BestRun.Score;
+            Exp.Best.Position  = BestRun.Position;
+            Exp.Best.Feasible  = BestRun.Feasible;
+
+            % ---- Hydraulics ----
+            Exp.Hydraulics.NodePressures  = app.NodePressures;
+            Exp.Hydraulics.PipeVelocities = app.PipeVelocities;
+            Exp.Hydraulics.Converged      = app.HydraulicsConverged;
+        end
+
     end
 
     % Component Initialization
@@ -1276,7 +1531,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         function createComponents(app)
 
             app.UIFigure = uifigure( ...
-                'Position', [80 60 1240 740], ...
+                'Position', [80 20 1240 740], ...
                 'Name', 'WDS Optimization Toolkit v1.7.0');
 
             MainGrid = uigridlayout(app.UIFigure, [1 2]);
@@ -1293,9 +1548,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             placeIn(app.LeftPanel, 1, 1);
 
             LeftGrid = uigridlayout(app.LeftPanel, [7 1]);
-            LeftGrid.RowHeight = {195, 120, 120, 100, 44, 34, '1x'};
+            LeftGrid.RowHeight = {190, 115, 115, 120, 40, 34, '1x'};
             LeftGrid.Padding = [6 6 6 6];
-            LeftGrid.RowSpacing = 6;
+            LeftGrid.RowSpacing = 5;
 
             % 1. Input files
             FilesPanel = uipanel(LeftGrid, ...
@@ -1303,10 +1558,10 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             placeIn(FilesPanel, 1, 1);
 
             g = uigridlayout(FilesPanel, [5 2]);
-            g.ColumnWidth = {115, '1x'};
-            g.RowHeight = {24, 24, 24, 24, 48};
-            g.Padding = [8 6 8 6];
-            g.RowSpacing = 6;
+            g.ColumnWidth = {100, '1x'};
+            g.RowHeight = {22, 22, 22, 22, 40};
+            g.Padding = [4 4 4 4];
+            g.RowSpacing = 4;
 
             app.INPButton = uibutton(g, 'push', 'Text', 'Load .INP File', ...
                 'ButtonPushedFcn', @(btn, e) SelectINPFile(app, e));
@@ -1346,10 +1601,10 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             placeIn(HydPanel, 2, 1);
 
             g = uigridlayout(HydPanel, [3 2]);
-            g.ColumnWidth = {135, '1x'};
-            g.RowHeight = {24, 24, 24};
-            g.Padding = [8 6 8 6];
-            g.RowSpacing = 6;
+            g.ColumnWidth = {110, '1x'};
+            g.RowHeight = {22, 22, 22};
+            g.Padding = [4 4 4 4];
+            g.RowSpacing = 4;
 
             app.HeadlossDropDownLabel = uilabel(g, 'Text', 'Headloss Formula:');
             placeIn(app.HeadlossDropDownLabel, 1, 1);
@@ -1375,10 +1630,10 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             placeIn(ConPanel, 3, 1);
 
             g = uigridlayout(ConPanel, [3 2]);
-            g.ColumnWidth = {150, '1x'};
-            g.RowHeight = {24, 24, 24};
-            g.Padding = [8 6 8 6];
-            g.RowSpacing = 6;
+            g.ColumnWidth = {120, '1x'};
+            g.RowHeight = {22, 22, 22};
+            g.Padding = [4 4 4 4];
+            g.RowSpacing = 4;
 
             app.PminEditFieldLabel = uilabel(g, 'Text', 'Min Pressure (m):');
             placeIn(app.PminEditFieldLabel, 1, 1);
@@ -1400,9 +1655,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 'Title', '4. Experiment', 'FontWeight', 'bold');
             placeIn(ExpPanel, 4, 1);
 
-            g = uigridlayout(ExpPanel, [2 1]);
-            g.RowHeight = {28, '1x'};
-            g.Padding = [8 6 8 6];
+            g = uigridlayout(ExpPanel, [3 1]);
+            g.RowHeight = {24, 24, '1x'};
+            g.Padding = [4 4 4 4];
             g.RowSpacing = 4;
 
             app.ExperimentSettingsButton = uibutton(g, 'push', ...
@@ -1410,12 +1665,18 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 'ButtonPushedFcn', @(btn, e) OpenExperimentSettings(app));
             placeIn(app.ExperimentSettingsButton, 1, 1);
 
+            app.SaveButton = uibutton(g, 'push', ...
+                'Text', 'Save Experiment...', ...
+                'Enable', 'off', ...
+                'ButtonPushedFcn', @(btn, e) SaveExperiment(app));
+            placeIn(app.SaveButton, 2, 1);
+
             app.ExperimentSummaryLabel = uilabel(g, ...
                 'Text', '', ...
                 'WordWrap', 'on', ...
                 'VerticalAlignment', 'top', ...
                 'FontColor', [0.35 0.35 0.35]);
-            placeIn(app.ExperimentSummaryLabel, 2, 1);
+            placeIn(app.ExperimentSummaryLabel, 3, 1);
 
             % Run / Export / Status
             app.RunButton = uibutton(LeftGrid, 'push', ...
@@ -1424,15 +1685,28 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 'FontColor', 'w', ...
                 'FontSize', 13, ...
                 'FontWeight', 'bold', ...
-                'ButtonPushedFcn', ...
-                    @(btn, e) app.OnRunButtonPressed());
+                'ButtonPushedFcn', @(btn, e) app.OnRunButtonPressed());
             placeIn(app.RunButton, 5, 1);
 
-            app.ExportButton = uibutton(LeftGrid, 'push', ...
-                'Text', 'Export Excel (Multi-Sheet)', ...
+            % ردیف ۶: Load و Export در یک ردیف دو ستونه
+            BottomButtons = uigridlayout(LeftGrid, [1 2]);
+            BottomButtons.ColumnWidth = {'1x', '1x'};
+            BottomButtons.Padding = [0 0 0 0];
+            BottomButtons.ColumnSpacing = 4;
+            placeIn(BottomButtons, 6, 1);
+
+            app.LoadButton = uibutton(BottomButtons, 'push', ...
+                'Text', 'Load...', ...
+                'Tooltip', 'Load a saved experiment (.wdsx)', ...
+                'ButtonPushedFcn', @(btn, e) LoadExperiment(app));
+            placeIn(app.LoadButton, 1, 1);
+
+            app.ExportButton = uibutton(BottomButtons, 'push', ...
+                'Text', 'Export...', ...
+                'Tooltip', 'Export results to multi-sheet Excel workbook', ...
                 'Enable', 'off', ...
                 'ButtonPushedFcn', @(btn, e) ExportToExcel(app, e));
-            placeIn(app.ExportButton, 6, 1);
+            placeIn(app.ExportButton, 1, 2);
 
             app.StatusLabel = uilabel(LeftGrid, ...
                 'Text', 'Status: Ready', ...
