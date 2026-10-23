@@ -63,6 +63,20 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
         tournamentSize = Config.GA.TournamentSize;
     end
 
+    RestartAfter = [];
+
+    if isfield(Config.GA, 'RestartAfter') && ~isempty(Config.GA.RestartAfter)
+
+        RestartAfter = Config.GA.RestartAfter;
+
+        if ~isnumeric(RestartAfter) || ~isscalar(RestartAfter) || ...
+                RestartAfter < 1 || RestartAfter ~= floor(RestartAfter)
+            error('runGA:InvalidRestartAfter', ...
+                'Config.GA.RestartAfter must be a positive integer or empty.');
+        end
+
+    end
+
     ND = numel(Problem.D);
     NVar = numel(Problem.VariablePipes);
 
@@ -74,6 +88,13 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
 
     BestUnfeasibleSol = [];
     BestUnfeasibleCost = Inf;
+
+    % Best solution over all restarts (the result of the run).
+    GlobalSol = [];
+    GlobalCost = Inf;
+    GlobalViol = Inf;
+
+    StagnationCount = 0;
 
     Pop = randi(ND, NVar, NS);
 
@@ -154,6 +175,9 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
             evaluatePopulation( ...
                 Pop, Problem, d, Cache, Config.Parallel);
 
+        [PrevEpochCost, PrevEpochViol] = epochBest( ...
+            BestSolEver, BestCostEver, BestUnfeasibleCost, BestViolEver);
+        
         feasible_idx = find(feas);
 
         if ~isempty(feasible_idx)
@@ -178,15 +202,29 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
 
         end
 
-        if ~isempty(BestSolEver)
+        [EpochCost, EpochViol] = epochBest( ...
+            BestSolEver, BestCostEver, BestUnfeasibleCost, BestViolEver);
 
-            Conv(G) = BestCostEver;
-
+        if isBetterSolution(EpochCost, EpochViol, PrevEpochCost, PrevEpochViol)
+            StagnationCount = 0;
         else
+            StagnationCount = StagnationCount + 1;
+        end
 
-            Conv(G) = BestUnfeasibleCost;
+        if isBetterSolution(EpochCost, EpochViol, GlobalCost, GlobalViol)
+
+            if ~isempty(BestSolEver)
+                GlobalSol = BestSolEver;
+            else
+                GlobalSol = BestUnfeasibleSol;
+            end
+
+            GlobalCost = EpochCost;
+            GlobalViol = EpochViol;
 
         end
+
+        Conv(G) = GlobalCost;
 
         % Report selected generations to the optional callback.
         ShouldReportProgress = ...
@@ -202,7 +240,7 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
                 'Generation', G, ...
                 'MaxGenerations', MaxGen, ...
                 'BestCost', Conv(G), ...
-                'Feasible', ~isempty(BestSolEver), ...
+                'Feasible', (GlobalViol == 0), ...
                 'Convergence', Conv(1:G));
 
             try
@@ -222,26 +260,48 @@ function [Score, Position, Conv, Feasible] = runGA(d, Problem, Config)
 
         end
 
+        % Restart the population when the search has stagnated.
+        if ~isempty(RestartAfter) && ...
+                StagnationCount >= RestartAfter && G < MaxGen
+
+            Pop = randi(ND, NVar, NS);
+
+            [cost, viol, ~, Cache] = evaluatePopulation( ...
+                Pop, Problem, d, Cache, Config.Parallel);
+
+            % A new, independent epoch: elitism uses only its own best.
+            BestCostEver = Inf;
+            BestSolEver = [];
+            BestViolEver = Inf;
+
+            BestUnfeasibleSol = [];
+            BestUnfeasibleCost = Inf;
+
+            StagnationCount = 0;
+
+        end
+
     end
 
-    if isempty(BestSolEver)
-
-        BestSolEver = BestUnfeasibleSol;
-        BestCostEver = BestUnfeasibleCost;
-        Feasible = false;
-
-    else
-
-        Feasible = true;
-
-    end
-
-    Score = BestCostEver;
+    Feasible = (GlobalViol == 0);
+    Score = GlobalCost;
 
     FullDiameters = Problem.InitialD;
     FullDiameters(Problem.VariablePipes) = ...
-        Problem.D(BestSolEver);
+        Problem.D(GlobalSol);
 
     Position = FullDiameters';
+
+end
+
+function [c, v] = epochBest(BestSol, BestCost, BestUnfeasibleCost, BestViol)
+
+    if ~isempty(BestSol)
+        c = BestCost;
+        v = 0;
+    else
+        c = BestUnfeasibleCost;
+        v = BestViol;
+    end
 
 end

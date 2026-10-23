@@ -52,6 +52,20 @@ function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
     c1 = Config.PSO.c1;
     c2 = Config.PSO.c2;
 
+    RestartAfter = [];
+
+    if isfield(Config.PSO, 'RestartAfter') && ~isempty(Config.PSO.RestartAfter)
+
+        RestartAfter = Config.PSO.RestartAfter;
+
+        if ~isnumeric(RestartAfter) || ~isscalar(RestartAfter) || ...
+                RestartAfter < 1 || RestartAfter ~= floor(RestartAfter)
+            error('runPSO:InvalidRestartAfter', ...
+                'Config.PSO.RestartAfter must be a positive integer or empty.');
+        end
+
+    end
+
     X = randi(ND, NVar, N);
     V = zeros(NVar, N);
 
@@ -74,6 +88,13 @@ function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
     GBestCost = Inf;
     GBestViol = Inf;
 
+    % Best solution over all swarm restarts (the result of the run).
+    BestX = [];
+    BestCost = Inf;
+    BestViol = Inf;
+
+    StagnationCount = 0;
+
     Conv = zeros(MaxGen, 1);
 
     for G = 1:MaxGen
@@ -91,6 +112,9 @@ function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
             evaluatePopulation( ...
                 X_discrete, Problem, d, Cache, Config.Parallel);
 
+        PrevGBestCost = GBestCost;
+        PrevGBestViol = GBestViol;
+        
         for i = 1:N
 
             if feas(i)
@@ -140,6 +164,12 @@ function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
 
         end
 
+        if isBetterSolution(GBestCost, GBestViol, PrevGBestCost, PrevGBestViol)
+            StagnationCount = 0;
+        else
+            StagnationCount = StagnationCount + 1;
+        end
+
         for i = 1:N
 
             r1 = rand(NVar, 1);
@@ -154,7 +184,33 @@ function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
 
         end
 
-        Conv(G) = GBestCost;
+        % Track the best solution over all restarts.
+        if isBetterSolution(GBestCost, GBestViol, BestCost, BestViol)
+            BestX = GBestX;
+            BestCost = GBestCost;
+            BestViol = GBestViol;
+        end
+
+        Conv(G) = BestCost;
+
+        % Restart the swarm when the search has stagnated.
+        if ~isempty(RestartAfter) && ...
+                StagnationCount >= RestartAfter && G < MaxGen
+
+            X = randi(ND, NVar, N);
+            V = zeros(NVar, N);
+
+            PBestX = X;
+            PBestCost = Inf(1, N);
+            PBestViol = Inf(1, N);
+
+            GBestX = [];
+            GBestCost = Inf;
+            GBestViol = Inf;
+
+            StagnationCount = 0;
+
+        end
 
         % Report selected generations to the optional callback.
         ShouldReportProgress = ...
@@ -170,7 +226,7 @@ function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
                 'Generation', G, ...
                 'MaxGenerations', MaxGen, ...
                 'BestCost', Conv(G), ...
-                'Feasible', (GBestViol == 0), ...
+                'Feasible', (BestViol == 0), ...
                 'Convergence', Conv(1:G));
 
             try
@@ -186,12 +242,12 @@ function [Score, Position, Conv, Feasible] = runPSO(d, Problem, Config)
 
     end
 
-    Score = GBestCost;
-    Feasible = (GBestViol == 0);
+    Score = BestCost;
+    Feasible = (BestViol == 0);
 
     FullDiameters = Problem.InitialD;
     FullDiameters(Problem.VariablePipes) = ...
-        Problem.D(GBestX);
+        Problem.D(BestX);
     Position = FullDiameters';
 
 end

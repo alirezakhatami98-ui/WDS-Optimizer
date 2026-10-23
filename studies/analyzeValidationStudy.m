@@ -157,18 +157,3 @@ function [score, feas, ok] = collectRuns(Runs)
     end
 
 end
-
-function ref = referenceCost(net)
-% Best-known costs reported in the literature for the standard problem
-% definitions (Hazen-Williams, Pmin = 30 m). Please verify them against the
-% source you cite: they are only valid if your D.txt, Cost.txt and .inp
-% define exactly the same problem.
-    switch lower(net)
-        case '2loops'
-            ref = 419000;
-        case 'hanoi'
-            ref = 6081000;
-        otherwise
-            error('No reference cost for network "%s".', net);
-    end
-end

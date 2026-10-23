@@ -93,6 +93,22 @@ function testPureFunctions()
     assert(isequal(Din, [1; 12; 24]) && isequal(Cost, [10; 20; 30]));
     assert(isequal(D, Din * 25.4));
 
+    %% selectionTournament
+    rng(1);
+    cost5 = [100; 200; 300; 400; 500];
+    idx = selectionTournament(cost5, zeros(5, 1), 20000, 3);
+    share = histcounts(idx, 1:6) / 20000;
+    assert(abs(share(1) - (1 - 0.8^3)) < 0.02, 'Best individual share is wrong.');
+    assert(abs(share(5) - 0.2^3) < 0.01, 'Worst individual share is wrong.');
+
+    % Feasible beats infeasible even when it costs more
+    idx = selectionTournament([1000; 1], [0; 5], 20000, 3);
+    assert(abs(mean(idx == 1) - (1 - 0.5^3)) < 0.02);
+
+    % Among infeasible designs the smaller violation wins
+    idx = selectionTournament([1; 1000], [9; 2], 20000, 3);
+    assert(abs(mean(idx == 2) - (1 - 0.5^3)) < 0.02);
+
 end
 
 function expectError(fcn, idPart)

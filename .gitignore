@@ -8,4 +8,4 @@ temp_network*.inp
 temp_network*.txt
 
 # studies
-studies/results/
+studies/results/**/*.mat
