@@ -111,6 +111,10 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         LastExperimentSaved logical = true
         SaveButton          matlab.ui.control.Button
         LoadButton          matlab.ui.control.Button
+
+        % Comparison
+        ComparisonFigure    matlab.ui.Figure
+        CompareButton       matlab.ui.control.Button
     end
 
     methods (Access = private)
@@ -213,7 +217,6 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             app.CancelRequested = false;
             app.ExperimentRunning = true;
-            app.StatusLabel.Text = 'Status: Running Experiment...';
 
             % Warn about unsaved previous experiment
             if ~app.LastExperimentSaved && ~isempty(app.ExperimentResult)
@@ -224,9 +227,12 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     'Options', {'Continue', 'Cancel'}, ...
                     'DefaultOption', 2, 'CancelOption', 2);
                 if strcmp(choice, 'Cancel')
+                    app.ExperimentRunning = false;   % ← اضافه شود
                     return;
                 end
             end
+
+            app.StatusLabel.Text = 'Status: Running Experiment...';   % ← منتقل شد
 
             app.RunButton.Text = 'Cancel Experiment';
             app.RunButton.BackgroundColor = [0.85 0.15 0.15];
@@ -234,6 +240,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.RunButton.Enable = 'on';
             app.ExportButton.Enable = 'off';
             app.SaveButton.Enable = 'off';
+            app.LoadButton.Enable = 'off';       % ← اضافه شود
+            app.CompareButton.Enable = 'off';    % ← اضافه شود
 
             app.CreateLiveMonitorWindow();
             drawnow;
@@ -587,6 +595,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             app.ExperimentRunning = false;
             app.LoadButton.Enable = 'on';
+            app.CompareButton.Enable = 'on';     % ← اضافه شود
             app.CancelRequested = false;
 
             app.RunButton.Text = 'Run Experiment';
@@ -601,13 +610,10 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             if app.ExperimentRunning
                 app.CancelRequested = true;
                 app.RunButton.Enable = 'off';
-                app.LoadButton.Enable = 'off';      % جدید
                 app.StatusLabel.Text = 'Status: Cancellation requested...';
                 drawnow;
             else
-                app.LoadButton.Enable = 'off';      % جدید
                 app.RunOptimization([]);
-                app.LoadButton.Enable = 'on';       % جدید
             end
 
         end
@@ -1524,6 +1530,160 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             Exp.Hydraulics.Converged      = app.HydraulicsConverged;
         end
 
+        % --- Compare two saved experiments ---
+        function CompareExperiments(app)
+
+            [fileA, pathA] = uigetfile('*.wdsx', ...
+                'Select Experiment A (.wdsx)');
+            if ~ischar(fileA), return; end
+
+            [fileB, pathB] = uigetfile('*.wdsx', ...
+                'Select Experiment B (.wdsx)');
+            if ~ischar(fileB), return; end
+
+            try
+                SA = load(fullfile(pathA, fileA), '-mat');
+                if ~isfield(SA, 'SavedExperiment')
+                    error('WDS:InvalidFile', ...
+                        'Experiment A is not a WDS Optimizer file.');
+                end
+                ExpA = SA.SavedExperiment;
+                validateSavedExperiment(ExpA);
+
+                SB = load(fullfile(pathB, fileB), '-mat');
+                if ~isfield(SB, 'SavedExperiment')
+                    error('WDS:InvalidFile', ...
+                        'Experiment B is not a WDS Optimizer file.');
+                end
+                ExpB = SB.SavedExperiment;
+                validateSavedExperiment(ExpB);
+            catch ME
+                uialert(app.UIFigure, ME.message, 'Comparison Load Error');
+                return;
+            end
+
+            if ~strcmp(ExpA.Environment.InpFileHash, ...
+                    ExpB.Environment.InpFileHash)
+                choice = uiconfirm(app.UIFigure, ...
+                    ['The two experiments were run on different networks. ' ...
+                     'Cost values are in different scales and are not ' ...
+                     'directly comparable. Proceed anyway?'], ...
+                    'Different Networks', ...
+                    'Options', {'Proceed', 'Cancel'}, ...
+                    'DefaultOption', 2, 'CancelOption', 2);
+                if strcmp(choice, 'Cancel'), return; end
+            end
+
+            app.ShowComparisonWindow(ExpA, ExpB, fileA, fileB);
+        end
+
+        % --- Build and display the comparison window ---
+        function ShowComparisonWindow(app, ExpA, ExpB, NameA, NameB)
+
+            if ~isempty(app.ComparisonFigure) && ...
+                    isvalid(app.ComparisonFigure)
+                delete(app.ComparisonFigure);
+            end
+
+            app.ComparisonFigure = uifigure( ...
+                'Name', sprintf('Comparison: %s vs %s', NameA, NameB), ...
+                'Position', [120 60 1100 720]);
+
+            f = app.ComparisonFigure;
+
+            g = uigridlayout(f, [2 1]);
+            g.RowHeight = {'1x', 44};
+            g.Padding = [10 10 10 10];
+            g.RowSpacing = 8;
+
+            Tabs = uitabgroup(g);
+            placeIn(Tabs, 1, 1);
+
+            % ---- Summary tab ----
+            gs = uigridlayout(uitab(Tabs, 'Title', 'Summary'), [2 1]);
+            gs.RowHeight = {28, '1x'};
+            gs.Padding = [8 8 8 8];
+            gs.RowSpacing = 6;
+
+            uilabel(gs, ...
+                'Text', ['Delta = B - A  (positive means B is higher; ' ...
+                         'for cost, lower is better)'], ...
+                'FontAngle', 'italic', ...
+                'FontColor', [0.4 0.4 0.4]);
+
+            Tbl = uitable(gs, ...
+                'ColumnName', ...
+                    {'Metric', 'Experiment A', 'Experiment B', 'Delta (B - A)'}, ...
+                'RowName', {}, ...
+                'ColumnWidth', {230, 200, 200, 160});
+            placeIn(Tbl, 2, 1);
+
+            [Data, SectionRows] = ...
+                buildComparisonSummaryData(ExpA, ExpB, NameA, NameB);
+            Tbl.Data = Data;
+
+            if any(SectionRows)
+                addStyle(Tbl, ...
+                    uistyle('FontWeight', 'bold', ...
+                            'BackgroundColor', [0.92 0.92 0.92]), ...
+                    'row', find(SectionRows));
+            end
+
+            % ---- Convergence tab ----
+            ConvTab = uitab(Tabs, 'Title', 'Convergence');
+            gc = uigridlayout(ConvTab, [1 1]);
+            gc.Padding = [8 8 8 8];
+            ComparisonConvAxes = uiaxes(gc);
+            plotComparisonConvergence(ComparisonConvAxes, ExpA, ExpB, NameA, NameB);
+
+            % ---- Distribution tab ----
+            DistTab = uitab(Tabs, 'Title', 'Distribution');
+            gd = uigridlayout(DistTab, [1 1]);
+            gd.Padding = [8 8 8 8];
+            DistAxes = uiaxes(gd);
+            plotComparisonDistribution(DistAxes, ExpA, ExpB);
+
+            % ---- Bottom button row ----
+            BtnRow = uigridlayout(g, [1 3]);
+            BtnRow.ColumnWidth = {'1x', 200, 100};
+            BtnRow.Padding = [0 0 0 0];
+            BtnRow.ColumnSpacing = 6;
+            placeIn(BtnRow, 2, 1);
+
+            uilabel(BtnRow, 'Text', '');  % spacer
+
+            uibutton(BtnRow, 'push', ...
+                'Text', 'Export Comparison...', ...
+                'ButtonPushedFcn', ...
+                    @(~, ~) app.ExportComparison(ExpA, ExpB, NameA, NameB));
+
+            uibutton(BtnRow, 'push', ...
+                'Text', 'Close', ...
+                'ButtonPushedFcn', @(~, ~) delete(f));
+        end
+
+        % --- Export comparison workbook ---
+        function ExportComparison(app, ExpA, ExpB, NameA, NameB)
+
+            [file, path] = uiputfile( ...
+                '*.xlsx', ...
+                'Save Comparison as Excel', ...
+                sprintf('WDS_Compare_%s.xlsx', ...
+                    char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'))));
+
+            if ~ischar(file), return; end
+
+            try
+                exportComparisonToExcel(ExpA, ExpB, NameA, NameB, ...
+                    fullfile(path, file));
+                uialert(app.UIFigure, ...
+                    'Comparison exported successfully!', ...
+                    'Export Success', 'Icon', 'success');
+            catch ME
+                uialert(app.UIFigure, ME.message, 'Export Error');
+            end
+        end
+
     end
 
     % Component Initialization
@@ -1688,9 +1848,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 'ButtonPushedFcn', @(btn, e) app.OnRunButtonPressed());
             placeIn(app.RunButton, 5, 1);
 
-            % ردیف ۶: Load و Export در یک ردیف دو ستونه
-            BottomButtons = uigridlayout(LeftGrid, [1 2]);
-            BottomButtons.ColumnWidth = {'1x', '1x'};
+             % ردیف ۶: Load، Compare و Export در یک ردیف
+            BottomButtons = uigridlayout(LeftGrid, [1 3]);
+            BottomButtons.ColumnWidth = {'1x', '1x', '1x'};
             BottomButtons.Padding = [0 0 0 0];
             BottomButtons.ColumnSpacing = 4;
             placeIn(BottomButtons, 6, 1);
@@ -1701,12 +1861,18 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 'ButtonPushedFcn', @(btn, e) LoadExperiment(app));
             placeIn(app.LoadButton, 1, 1);
 
+            app.CompareButton = uibutton(BottomButtons, 'push', ...
+                'Text', 'Compare...', ...
+                'Tooltip', 'Compare two saved experiments (.wdsx)', ...
+                'ButtonPushedFcn', @(btn, e) CompareExperiments(app));
+            placeIn(app.CompareButton, 1, 2);
+
             app.ExportButton = uibutton(BottomButtons, 'push', ...
                 'Text', 'Export...', ...
                 'Tooltip', 'Export results to multi-sheet Excel workbook', ...
                 'Enable', 'off', ...
                 'ButtonPushedFcn', @(btn, e) ExportToExcel(app, e));
-            placeIn(app.ExportButton, 1, 2);
+            placeIn(app.ExportButton, 1, 3);
 
             app.StatusLabel = uilabel(LeftGrid, ...
                 'Text', 'Status: Ready', ...
