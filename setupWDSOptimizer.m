@@ -38,7 +38,8 @@ function setupWDSOptimizer()
         'validation'
         'parallel'
         'experiments'
-        'persistence'      % ← این خط اضافه شود
+        'persistence'
+        'reporting'          % ← این خط اضافه شود
         'tests'
         'studies'
     };

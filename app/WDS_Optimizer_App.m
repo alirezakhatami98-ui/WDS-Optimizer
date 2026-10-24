@@ -115,6 +115,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         % Comparison
         ComparisonFigure    matlab.ui.Figure
         CompareButton       matlab.ui.control.Button
+
+        % Report
+        ReportButton        matlab.ui.control.Button
     end
 
     methods (Access = private)
@@ -240,8 +243,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.RunButton.Enable = 'on';
             app.ExportButton.Enable = 'off';
             app.SaveButton.Enable = 'off';
-            app.LoadButton.Enable = 'off';       % ← اضافه شود
-            app.CompareButton.Enable = 'off';    % ← اضافه شود
+            app.LoadButton.Enable = 'off';
+            app.CompareButton.Enable = 'off';
+            app.ReportButton.Enable = 'off';
 
             app.CreateLiveMonitorWindow();
             drawnow;
@@ -543,15 +547,15 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
                 end
 
-                app.ExportButton.Enable = 'on';
-
                 app.LastProblem         = Problem;
                 app.LastConfig          = Config;
                 app.LastBestAlgorithm   = BestAlgorithm;
                 app.LastBestRunIndex    = BestRunIndex;
                 app.HydraulicsConverged = Converged;
                 app.LastExperimentSaved = false;
-                app.SaveButton.Enable   = 'on';
+                app.ExportButton.Enable = 'on';
+                app.SaveButton.Enable = 'on';
+                app.ReportButton.Enable = 'on';
 
             catch ME
 
@@ -595,8 +599,10 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             app.ExperimentRunning = false;
             app.LoadButton.Enable = 'on';
-            app.CompareButton.Enable = 'on';     % ← اضافه شود
+            app.CompareButton.Enable = 'on';
             app.CancelRequested = false;
+            % Note: ReportButton is only enabled on successful runs
+            % or after a successful Load, not here.
 
             app.RunButton.Text = 'Run Experiment';
             app.RunButton.BackgroundColor = [0.1 0.6 0.2];
@@ -1464,6 +1470,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.LastExperimentSaved = true;
             app.ExportButton.Enable = 'on';
             app.SaveButton.Enable   = 'on';
+            app.ReportButton.Enable = 'on';       % ← اضافه شود
             app.StatusLabel.Text = sprintf( ...
                 'Status: Loaded "%s" (saved %s).', fileName, ...
                 char(Exp.Timestamp));
@@ -1684,6 +1691,61 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             end
         end
 
+        % --- Generate reproducibility report ---
+        function GenerateReport(app)
+
+            if isempty(app.ExperimentResult) || isempty(app.LastProblem)
+                uialert(app.UIFigure, ...
+                    'There is no completed experiment to report on.', ...
+                    'Nothing to Report');
+                return;
+            end
+
+            parentDir = uigetdir(pwd, ...
+                'Select folder to save the reproducibility report');
+            if isequal(parentDir, 0)
+                return;
+            end
+
+            app.StatusLabel.Text = 'Status: Generating report...';
+            drawnow;
+
+            try
+                % Build a snapshot identical to what Save would write.
+                Exp = app.BuildExperimentSnapshot();
+
+                % No dialog about saving required — the report bundle
+                % contains all inputs and results; the .wdsx is
+                % optional and orthogonal.
+
+                outDir = generateReproducibilityReport(Exp, parentDir);
+
+                app.StatusLabel.Text = sprintf( ...
+                    'Status: Report saved to %s.', outDir);
+
+                choice = uiconfirm(app.UIFigure, ...
+                    sprintf(['Report generated successfully:\n\n%s\n\n' ...
+                             'Open the report folder?'], outDir), ...
+                    'Report Generated', ...
+                    'Options', {'Open Folder', 'Close'}, ...
+                    'DefaultOption', 1, 'CancelOption', 2);
+
+                if strcmp(choice, 'Open Folder')
+                    if ispc
+                        winopen(outDir);
+                    elseif ismac
+                        system(sprintf('open "%s"', outDir));
+                    else
+                        system(sprintf('xdg-open "%s" &', outDir));
+                    end
+                end
+
+            catch ME
+                app.StatusLabel.Text = 'Status: Report generation failed.';
+                uialert(app.UIFigure, ME.message, 'Report Error');
+            end
+        end
+
     end
 
     % Component Initialization
@@ -1848,11 +1910,11 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 'ButtonPushedFcn', @(btn, e) app.OnRunButtonPressed());
             placeIn(app.RunButton, 5, 1);
 
-             % ردیف ۶: Load، Compare و Export در یک ردیف
-            BottomButtons = uigridlayout(LeftGrid, [1 3]);
-            BottomButtons.ColumnWidth = {'1x', '1x', '1x'};
+            % ردیف ۶: Load، Compare، Report و Export در یک ردیف
+            BottomButtons = uigridlayout(LeftGrid, [1 4]);
+            BottomButtons.ColumnWidth = {'1x', '1x', '1x', '1x'};
             BottomButtons.Padding = [0 0 0 0];
-            BottomButtons.ColumnSpacing = 4;
+            BottomButtons.ColumnSpacing = 3;
             placeIn(BottomButtons, 6, 1);
 
             app.LoadButton = uibutton(BottomButtons, 'push', ...
@@ -1867,12 +1929,19 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 'ButtonPushedFcn', @(btn, e) CompareExperiments(app));
             placeIn(app.CompareButton, 1, 2);
 
+            app.ReportButton = uibutton(BottomButtons, 'push', ...
+                'Text', 'Report...', ...
+                'Tooltip', 'Generate a reproducibility report', ...
+                'Enable', 'off', ...
+                'ButtonPushedFcn', @(btn, e) GenerateReport(app));
+            placeIn(app.ReportButton, 1, 3);
+
             app.ExportButton = uibutton(BottomButtons, 'push', ...
                 'Text', 'Export...', ...
                 'Tooltip', 'Export results to multi-sheet Excel workbook', ...
                 'Enable', 'off', ...
                 'ButtonPushedFcn', @(btn, e) ExportToExcel(app, e));
-            placeIn(app.ExportButton, 1, 3);
+            placeIn(app.ExportButton, 1, 4);
 
             app.StatusLabel = uilabel(LeftGrid, ...
                 'Text', 'Status: Ready', ...
