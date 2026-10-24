@@ -76,6 +76,23 @@ function md = buildReportMarkdown(Exp)
     md(end+1, 1) = sprintf("| Population / Swarm size | %d |", C.NS);
     md(end+1, 1) = sprintf("| Max Generations / Iterations | %d |", C.MaxGen);
     md(end+1, 1) = sprintf("| Cache mode | %s |", C.CacheMode);
+    % Add algorithm-specific parameters from Settings when available
+    if isfield(Exp, 'Settings') && ~isempty(Exp.Settings)
+        if any(strcmp(C.Algorithms, 'GA')) && isfield(Exp.Settings, 'GA')
+            md(end+1, 1) = sprintf("| GA Pc (crossover) | %.3f |", ...
+                Exp.Settings.GA.Pc);
+            md(end+1, 1) = sprintf("| GA Pm (mutation) | %.3f |", ...
+                Exp.Settings.GA.Pm);
+        end
+        if any(strcmp(C.Algorithms, 'PSO')) && isfield(Exp.Settings, 'PSO')
+            md(end+1, 1) = sprintf("| PSO w (inertia) | %.3f |", ...
+                Exp.Settings.PSO.w);
+            md(end+1, 1) = sprintf("| PSO c1 (cognitive) | %.3f |", ...
+                Exp.Settings.PSO.c1);
+            md(end+1, 1) = sprintf("| PSO c2 (social) | %.3f |", ...
+                Exp.Settings.PSO.c2);
+        end
+    end
     md(end+1, 1) = "";
 
     % ---------------- Section 4: Reproducibility ----------------

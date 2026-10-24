@@ -118,6 +118,16 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
         % Report
         ReportButton        matlab.ui.control.Button
+
+        % Sweep
+        SweepButton          matlab.ui.control.Button
+        SweepDialogFigure    matlab.ui.Figure
+        SweepProgressFigure  matlab.ui.Figure
+        SweepOverallLabel    matlab.ui.control.Label
+        SweepCurrentLabel    matlab.ui.control.Label
+        SweepProgressAxes    matlab.ui.control.UIAxes
+        SweepConvergenceLine matlab.graphics.chart.primitive.Line
+        SweepResultFigure    matlab.ui.Figure
     end
 
     methods (Access = private)
@@ -246,6 +256,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.LoadButton.Enable = 'off';
             app.CompareButton.Enable = 'off';
             app.ReportButton.Enable = 'off';
+            app.SweepButton.Enable = 'off';
 
             app.CreateLiveMonitorWindow();
             drawnow;
@@ -600,6 +611,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.ExperimentRunning = false;
             app.LoadButton.Enable = 'on';
             app.CompareButton.Enable = 'on';
+            app.SweepButton.Enable = 'on';
             app.CancelRequested = false;
             % Note: ReportButton is only enabled on successful runs
             % or after a successful Load, not here.
@@ -1478,63 +1490,14 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
         % --- Build a saveable snapshot of the current experiment state ---
         function Exp = BuildExperimentSnapshot(app)
-
-            Exp = struct();
-            Exp.FormatVersion = 1;
-            Exp.AppVersion    = '1.7.0';
-            Exp.Timestamp     = datetime('now');
-
-            % ---- Environment ----
-            inpContent  = readFileContent(app.InpFileStr);
-            dContent    = readFileContent(app.DFileStr);
-            costContent = readFileContent(app.CostFileStr);
-
-            [~, inpBase,  inpExt]  = fileparts(app.InpFileStr);
-            [~, dBase,    dExt]    = fileparts(app.DFileStr);
-            [~, costBase, costExt] = fileparts(app.CostFileStr);
-
-            Exp.Environment.InpFileName     = [inpBase  inpExt];
-            Exp.Environment.InpFilePath     = app.InpFileStr;
-            Exp.Environment.InpFileContent  = inpContent;
-            Exp.Environment.InpFileHash     = computeStringHash(inpContent);
-
-            Exp.Environment.DFileName       = [dBase dExt];
-            Exp.Environment.DFilePath       = app.DFileStr;
-            Exp.Environment.DFileContent    = dContent;
-            Exp.Environment.DFileHash       = computeStringHash(dContent);
-
-            Exp.Environment.CostFileName    = [costBase costExt];
-            Exp.Environment.CostFilePath    = app.CostFileStr;
-            Exp.Environment.CostFileContent = costContent;
-            Exp.Environment.CostFileHash    = computeStringHash(costContent);
-
-            Exp.Environment.DUnit    = app.DUnitDropDown.Value;
-            Exp.Environment.Headloss = app.HeadlossDropDown.Value;
-
-            % ---- Settings + Config ----
-            Exp.Settings = app.ExperimentSettings;
-            Exp.Config   = sanitizeConfigForSave(app.LastConfig);
-
-            % ---- Problem ----
-            Exp.Problem  = app.LastProblem;
-
-            % ---- ExperimentResult ----
-            Exp.ExperimentResult = app.ExperimentResult;
-
-            % ---- Best ----
-            BestRun = Exp.ExperimentResult.Results.(app.LastBestAlgorithm)...
-                .Runs(app.LastBestRunIndex);
-
-            Exp.Best.Algorithm = app.LastBestAlgorithm;
-            Exp.Best.RunIndex  = app.LastBestRunIndex;
-            Exp.Best.Score     = BestRun.Score;
-            Exp.Best.Position  = BestRun.Position;
-            Exp.Best.Feasible  = BestRun.Feasible;
-
-            % ---- Hydraulics ----
-            Exp.Hydraulics.NodePressures  = app.NodePressures;
-            Exp.Hydraulics.PipeVelocities = app.PipeVelocities;
-            Exp.Hydraulics.Converged      = app.HydraulicsConverged;
+            Exp = buildSnapshotFromComponents( ...
+                app.InpFileStr, app.DFileStr, app.CostFileStr, ...
+                app.DUnitDropDown.Value, app.HeadlossDropDown.Value, ...
+                app.ExperimentSettings, app.LastConfig, app.LastProblem, ...
+                app.ExperimentResult, app.LastBestAlgorithm, ...
+                app.LastBestRunIndex, ...
+                app.NodePressures, app.PipeVelocities, ...
+                app.HydraulicsConverged);
         end
 
         % --- Compare two saved experiments ---
@@ -1746,6 +1709,542 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             end
         end
 
+        % --- Parameter Sensitivity Sweep entry point ---
+        function RunSweep(app)
+
+            if isempty(app.InpFileStr) || isempty(app.DFileStr) || ...
+                    isempty(app.CostFileStr)
+                uialert(app.UIFigure, ...
+                    'Please load all required input files first!', ...
+                    'Input Error');
+                return;
+            end
+
+            if isempty(app.ExperimentSettings)
+                uialert(app.UIFigure, ...
+                    'Please configure Experiment Settings first.', ...
+                    'Settings Required');
+                return;
+            end
+
+            if app.ExperimentRunning
+                uialert(app.UIFigure, ...
+                    'Another operation is already running.', 'Busy');
+                return;
+            end
+
+            app.OpenSweepDialog();
+        end
+
+        % --- Sweep configuration dialog ---
+        function OpenSweepDialog(app)
+
+            Settings = app.ExperimentSettings;
+
+            % Determine which parameters are available based on enabled
+            % algorithms.
+            Labels = {};
+            Ids    = {};
+
+            if any(strcmp(Settings.Algorithms, 'Genetic Algorithm (GA)'))
+                Labels = [Labels, {'GA Crossover Probability (Pc)', ...
+                                   'GA Mutation Probability (Pm)'}];
+                Ids    = [Ids, {'GA_Pc', 'GA_Pm'}];
+            end
+
+            if any(strcmp(Settings.Algorithms, 'Particle Swarm (PSO)'))
+                Labels = [Labels, {'PSO Inertia Weight (w)', ...
+                                   'PSO Cognitive Coefficient (c1)', ...
+                                   'PSO Social Coefficient (c2)'}];
+                Ids    = [Ids, {'PSO_w', 'PSO_c1', 'PSO_c2'}];
+            end
+
+            Labels = [Labels, {'Population / Swarm Size', ...
+                               'Max Generations / Iterations', ...
+                               'Runs per Algorithm', ...
+                               'Experiment Seed'}];
+            Ids    = [Ids, {'NS', 'MaxGen', 'NumberOfRuns', 'ExperimentSeed'}];
+
+            if ~isempty(app.SweepDialogFigure) && ...
+                    isvalid(app.SweepDialogFigure)
+                delete(app.SweepDialogFigure);
+            end
+
+            app.SweepDialogFigure = uifigure( ...
+                'Name', 'Parameter Sensitivity Sweep', ...
+                'Position', [200 150 600 500], ...
+                'WindowStyle', 'modal');
+
+            f = app.SweepDialogFigure;
+
+            uilabel(f, ...
+                'Text', 'Sweep Configuration', ...
+                'Position', [20 455 550 24], ...
+                'FontSize', 16, 'FontWeight', 'bold');
+
+            uilabel(f, 'Text', 'Parameter to sweep:', ...
+                'Position', [25 410 200 22]);
+
+            ParamDropdown = uidropdown(f, ...
+                'Position', [200 410 375 22], ...
+                'Items', Labels, ...
+                'ItemsData', Ids, ...
+                'Value', Ids{1});
+
+            CurrentValueLabel = uilabel(f, ...
+                'Text', '', ...
+                'Position', [200 385 375 20], ...
+                'FontColor', [0.45 0.45 0.45], ...
+                'FontAngle', 'italic');
+
+            function updateCurrentLabel(~)
+                v = app.CurrentSweepParameterValue(ParamDropdown.Value);
+                CurrentValueLabel.Text = sprintf('Current value: %g', v);
+            end
+
+            ParamDropdown.ValueChangedFcn = @(src, e) updateCurrentLabel();
+            updateCurrentLabel();
+
+            uilabel(f, 'Text', 'Values (comma-separated):', ...
+                'Position', [25 345 200 22]);
+
+            ValuesField = uieditfield(f, 'text', ...
+                'Position', [200 345 375 22], ...
+                'Placeholder', 'e.g. 0.6, 0.7, 0.8, 0.9');
+
+            uilabel(f, ...
+                'Text', ['Tip: values must be unique. Integer parameters ' ...
+                         '(NS, MaxGen, Runs, Seed) require positive integers.'], ...
+                'Position', [25 320 550 18], ...
+                'FontSize', 9, ...
+                'FontColor', [0.45 0.45 0.45]);
+
+            uilabel(f, 'Text', 'Runs / algorithm (current):', ...
+                'Position', [25 285 200 22]);
+            uilabel(f, 'Text', sprintf('%d', Settings.NumberOfRuns), ...
+                'Position', [200 285 200 22], ...
+                'FontWeight', 'bold');
+
+            uilabel(f, 'Text', 'Algorithms:', ...
+                'Position', [25 255 200 22]);
+            uilabel(f, 'Text', strjoin(Settings.Algorithms, ' + '), ...
+                'Position', [200 255 375 22], ...
+                'FontWeight', 'bold');
+
+            uilabel(f, 'Text', 'Output folder:', ...
+                'Position', [25 215 200 22]);
+
+            OutDirField = uieditfield(f, 'text', ...
+                'Position', [200 215 250 22], ...
+                'Value', pwd);
+            uibutton(f, 'push', 'Text', 'Browse...', ...
+                'Position', [460 215 115 22], ...
+                'ButtonPushedFcn', @(btn, e) browseOutDir());
+
+            function browseOutDir(~)
+                sel = uigetdir(OutDirField.Value, ...
+                    'Select sweep output folder');
+                if ischar(sel)
+                    OutDirField.Value = sel;
+                end
+            end
+
+            uibutton(f, 'push', 'Text', 'Start Sweep', ...
+                'Position', [200 30 140 34], ...
+                'FontWeight', 'bold', ...
+                'BackgroundColor', [0.1 0.6 0.2], ...
+                'FontColor', 'w', ...
+                'ButtonPushedFcn', @(btn, e) onStart());
+
+            uibutton(f, 'push', 'Text', 'Cancel', ...
+                'Position', [355 30 100 34], ...
+                'ButtonPushedFcn', @(btn, e) delete(f));
+
+            function onStart(~)
+                pName = ParamDropdown.Value;
+                rawV  = ValuesField.Value;
+                outDir = OutDirField.Value;
+
+                try
+                    vals = parseSweepValues(rawV);
+
+                    if isempty(outDir) || ~isfolder(outDir)
+                        error('sweep:OutputFolder', ...
+                            'Output folder must be an existing directory.');
+                    end
+                catch ME
+                    uialert(f, ME.message, 'Invalid Configuration');
+                    return;
+                end
+
+                delete(f);
+                app.ExecuteSweep(pName, vals, outDir);
+            end
+        end
+
+        % --- Current value lookup for dialog hint ---
+        function v = CurrentSweepParameterValue(app, ParamId)
+
+            switch ParamId
+                case 'GA_Pc',         v = app.ExperimentSettings.GA.Pc;
+                case 'GA_Pm',         v = app.ExperimentSettings.GA.Pm;
+                case 'PSO_w',         v = app.ExperimentSettings.PSO.w;
+                case 'PSO_c1',        v = app.ExperimentSettings.PSO.c1;
+                case 'PSO_c2',        v = app.ExperimentSettings.PSO.c2;
+                case 'NS',            v = app.NSEditField.Value;
+                case 'MaxGen',        v = app.MaxGenEditField.Value;
+                case 'NumberOfRuns',  v = app.ExperimentSettings.NumberOfRuns;
+                case 'ExperimentSeed',v = app.ExperimentSettings.ExperimentSeed;
+                otherwise,            v = NaN;
+            end
+        end
+
+        % --- Execute the sweep (called after dialog closes) ---
+        function ExecuteSweep(app, ParamName, Values, ParentDir)
+
+            SubFolder = fullfile(ParentDir, sprintf('WDS_Sweep_%s_%s', ...
+                ParamName, char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'))));
+
+            % --- Disable UI ---
+            InitSave   = app.SaveButton.Enable;
+            InitExport = app.ExportButton.Enable;
+            InitReport = app.ReportButton.Enable;
+
+            app.ExperimentRunning = true;
+            app.CancelRequested   = false;
+
+            app.SaveButton.Enable    = 'off';
+            app.ExportButton.Enable  = 'off';
+            app.ReportButton.Enable  = 'off';
+            app.CompareButton.Enable = 'off';
+            app.LoadButton.Enable    = 'off';
+            app.SweepButton.Enable   = 'off';
+
+            app.RunButton.Text            = 'Cancel Sweep';
+            app.RunButton.BackgroundColor = [0.85 0.15 0.15];
+            app.RunButton.FontColor       = 'w';
+            app.RunButton.Enable          = 'on';
+
+            app.StatusLabel.Text = 'Status: Running parameter sweep...';
+            app.CreateSweepProgressWindow();
+            drawnow;
+
+            d = [];
+            tempInpPath = '';
+            parallelInitialized = false;
+
+            try
+                Settings = app.ExperimentSettings;
+
+                validateOptimizationParameters( ...
+                    app.NSEditField.Value, ...
+                    app.MaxGenEditField.Value, ...
+                    app.PminEditField.Value, ...
+                    app.VmaxEditField.Value);
+
+                app.UpdateSweepProgress(struct('Phase', 'Preparing'));
+
+                [d, tempInpPath, Problem, Config] = app.PrepareEnvironment();
+
+                Config.GA       = Settings.GA;
+                Config.PSO      = Settings.PSO;
+                Config.Parallel = Settings.Parallel;
+
+                ExperimentAlgorithms = {};
+                if any(strcmp(Settings.Algorithms, 'Genetic Algorithm (GA)'))
+                    ExperimentAlgorithms{end + 1} = 'GA';
+                end
+                if any(strcmp(Settings.Algorithms, 'Particle Swarm (PSO)'))
+                    ExperimentAlgorithms{end + 1} = 'PSO';
+                end
+
+                BaseOptions.NumberOfRuns   = Settings.NumberOfRuns;
+                BaseOptions.Algorithms     = ExperimentAlgorithms;
+                BaseOptions.ExperimentSeed = Settings.ExperimentSeed;
+                BaseOptions.CacheMode      = Settings.CacheMode;
+
+                validateSweepConfiguration(BaseOptions, ParamName, Values);
+
+                if Config.Parallel.Enabled
+                    app.UpdateSweepProgress( ...
+                        struct('Phase', 'PreparingParallel'));
+                    initializeParallelHydraulics( ...
+                        tempInpPath, Config.Parallel.NumWorkers);
+                    parallelInitialized = true;
+                end
+
+                Environment.InpFileStr    = app.InpFileStr;
+                Environment.DFileStr      = app.DFileStr;
+                Environment.CostFileStr   = app.CostFileStr;
+                Environment.DUnit         = app.DUnitDropDown.Value;
+                Environment.Headloss      = app.HeadlossDropDown.Value;
+                Environment.BaseSettings  = Settings;
+                Environment.OutDir        = SubFolder;
+
+                SweepResult = runParameterSweep( ...
+                    d, Problem, Config, BaseOptions, ...
+                    ParamName, Values, Environment, ...
+                    @(info) app.UpdateSweepProgress(info), ...
+                    @() app.CancelRequested);
+
+                if parallelInitialized
+                    cleanupParallelHydraulics();
+                    parallelInitialized = false;
+                end
+
+                cleanupEpanetObject(d);
+                d = [];
+                cleanupTempInpFiles(tempInpPath);
+
+                app.CloseSweepProgressWindow();
+                app.ShowSweepResultWindow(SweepResult);
+
+                SuccessCount = sum(strcmp( ...
+                    {SweepResult.Points.Status}, 'Success'));
+
+                if strcmp(SweepResult.Status, 'Cancelled')
+                    app.StatusLabel.Text = sprintf( ...
+                        'Status: Sweep cancelled after %d/%d points.', ...
+                        SuccessCount, numel(SweepResult.Values));
+                else
+                    app.StatusLabel.Text = sprintf( ...
+                        'Status: Sweep completed (%d points). Saved to %s.', ...
+                        SuccessCount, SubFolder);
+                end
+
+            catch ME
+                if parallelInitialized
+                    try
+                        cleanupParallelHydraulics();
+                    catch
+                    end
+                end
+                cleanupEpanetObject(d);
+                cleanupTempInpFiles(tempInpPath);
+                app.CloseSweepProgressWindow();
+
+                app.StatusLabel.Text = 'Status: Sweep error!';
+                uialert(app.UIFigure, ME.message, 'Sweep Error');
+            end
+
+            % --- Restore UI ---
+            app.ExperimentRunning   = false;
+            app.CancelRequested     = false;
+            app.SaveButton.Enable   = InitSave;
+            app.ExportButton.Enable = InitExport;
+            app.ReportButton.Enable = InitReport;
+            app.CompareButton.Enable = 'on';
+            app.LoadButton.Enable    = 'on';
+            app.SweepButton.Enable   = 'on';
+
+            app.RunButton.Text            = 'Run Experiment';
+            app.RunButton.BackgroundColor = [0.1 0.6 0.2];
+            app.RunButton.FontColor       = 'w';
+            app.RunButton.Enable          = 'on';
+        end
+
+        % --- Sweep progress window ---
+        function CreateSweepProgressWindow(app)
+
+            if ~isempty(app.SweepProgressFigure) && ...
+                    isvalid(app.SweepProgressFigure)
+                delete(app.SweepProgressFigure);
+            end
+
+            app.SweepProgressFigure = uifigure( ...
+                'Name', 'Sweep Progress', ...
+                'Position', [250 150 850 520], ...
+                'CloseRequestFcn', ...
+                    @(src, e) app.CloseSweepProgressWindow());
+
+            g = uigridlayout(app.SweepProgressFigure, [3 1]);
+            g.RowHeight = {40, 26, '1x'};
+            g.Padding = [10 10 10 10];
+            g.RowSpacing = 6;
+
+            app.SweepOverallLabel = uilabel(g, ...
+                'Text', 'Preparing sweep...', ...
+                'FontWeight', 'bold', 'FontSize', 13, 'WordWrap', 'on');
+            placeIn(app.SweepOverallLabel, 1, 1);
+
+            app.SweepCurrentLabel = uilabel(g, ...
+                'Text', '', 'WordWrap', 'on', ...
+                'FontColor', [0.4 0.4 0.4]);
+            placeIn(app.SweepCurrentLabel, 2, 1);
+
+            app.SweepProgressAxes = uiaxes(g);
+            placeIn(app.SweepProgressAxes, 3, 1);
+            title(app.SweepProgressAxes, 'Current Run Convergence');
+            xlabel(app.SweepProgressAxes, 'Generation / Iteration');
+            ylabel(app.SweepProgressAxes, 'Best Cost');
+            grid(app.SweepProgressAxes, 'on');
+            cla(app.SweepProgressAxes);
+            app.SweepConvergenceLine = plot( ...
+                app.SweepProgressAxes, nan, nan, 'LineWidth', 2);
+
+            drawnow;
+        end
+
+        function CloseSweepProgressWindow(app)
+            if ~isempty(app.SweepProgressFigure) && ...
+                    isvalid(app.SweepProgressFigure)
+                delete(app.SweepProgressFigure);
+            end
+        end
+
+        % --- Sweep progress updates ---
+        function UpdateSweepProgress(app, Info)
+
+            if isempty(app.SweepProgressFigure) || ...
+                    ~isvalid(app.SweepProgressFigure)
+                return;
+            end
+
+            switch Info.Phase
+                case 'Preparing'
+                    app.SweepOverallLabel.Text = 'Preparing environment...';
+                    app.SweepCurrentLabel.Text = '';
+
+                case 'PreparingParallel'
+                    app.SweepOverallLabel.Text = 'Starting parallel workers...';
+                    app.SweepCurrentLabel.Text = '';
+
+                case 'StartingPoint'
+                    app.SweepOverallLabel.Text = sprintf( ...
+                        'Point %d/%d  |  %s = %g', ...
+                        Info.PointIndex, Info.TotalPoints, ...
+                        strrep(Info.ParameterName, '_', ' '), ...
+                        Info.ParameterValue);
+                    app.SweepCurrentLabel.Text = 'Starting runs...';
+                    app.SweepConvergenceLine.XData = nan;
+                    app.SweepConvergenceLine.YData = nan;
+
+                case 'RunProgress'
+                    PI = Info.ProgressInfo;
+                    if PI.Feasible
+                        FeasText = 'Feasible';
+                    else
+                        FeasText = 'Infeasible';
+                    end
+                    app.SweepCurrentLabel.Text = sprintf( ...
+                        '%s | Gen %d/%d | Cost: %.2f | %s', ...
+                        PI.RunLabel, PI.Generation, PI.MaxGenerations, ...
+                        PI.BestCost, FeasText);
+                    app.SweepConvergenceLine.XData = 1:PI.Generation;
+                    app.SweepConvergenceLine.YData = PI.Convergence;
+                    if strcmp(PI.Algorithm, 'GA')
+                        app.SweepConvergenceLine.Color = [0.85 0.32 0.10];
+                    else
+                        app.SweepConvergenceLine.Color = [0.00 0.45 0.74];
+                    end
+
+                case 'PointDone'
+                    if Info.BestFeasible
+                        FeasText = 'feasible';
+                    else
+                        FeasText = 'infeasible';
+                    end
+                    app.SweepCurrentLabel.Text = sprintf( ...
+                        'Point %d/%d done: Best = %.2f (%s)', ...
+                        Info.PointIndex, Info.TotalPoints, ...
+                        Info.BestScore, FeasText);
+            end
+
+            drawnow limitrate;
+        end
+
+        % --- Sweep result window ---
+        function ShowSweepResultWindow(app, SweepResult)
+
+            if ~isempty(app.SweepResultFigure) && ...
+                    isvalid(app.SweepResultFigure)
+                delete(app.SweepResultFigure);
+            end
+
+            app.SweepResultFigure = uifigure( ...
+                'Name', sprintf('Sweep Result: %s', SweepResult.Parameter), ...
+                'Position', [100 60 1100 720]);
+
+            f = app.SweepResultFigure;
+
+            g = uigridlayout(f, [2 1]);
+            g.RowHeight = {'1x', 44};
+            g.Padding = [10 10 10 10];
+            g.RowSpacing = 8;
+
+            Tabs = uitabgroup(g);
+            placeIn(Tabs, 1, 1);
+
+            % ---- Summary tab ----
+            gs = uigridlayout(uitab(Tabs, 'Title', 'Summary'), [2 1]);
+            gs.RowHeight = {28, '1x'};
+            gs.Padding = [8 8 8 8];
+            gs.RowSpacing = 6;
+
+            uilabel(gs, ...
+                'Text', sprintf('%s | %d points | Status: %s | Output: %s', ...
+                    strrep(SweepResult.Parameter, '_', ' '), ...
+                    numel(SweepResult.Values), ...
+                    SweepResult.Status, SweepResult.OutDir), ...
+                'FontWeight', 'bold');
+
+            Tbl = uitable(gs, ...
+                'ColumnName', {'Value', 'Status', 'Best Cost', 'Feasible', ...
+                    'Feasibility %', 'Mean Cost', 'Std Cost', ...
+                    'Mean Time (s)', 'File'}, ...
+                'RowName', {}, 'ColumnSortable', true);
+            placeIn(Tbl, 2, 1);
+            Tbl.Data = createSweepSummaryTable(SweepResult);
+
+            % ---- Trends tab ----
+            gt = uigridlayout(uitab(Tabs, 'Title', 'Trends'), [1 1]);
+            gt.Padding = [8 8 8 8];
+            plotSweepTrends(gt, SweepResult);
+
+            % ---- Bottom buttons ----
+            BtnRow = uigridlayout(g, [1 4]);
+            BtnRow.ColumnWidth = {'1x', 160, 160, 100};
+            BtnRow.Padding = [0 0 0 0];
+            BtnRow.ColumnSpacing = 6;
+            placeIn(BtnRow, 2, 1);
+
+            uilabel(BtnRow, 'Text', '');
+
+            uibutton(BtnRow, 'push', ...
+                'Text', 'Export CSV...', ...
+                'ButtonPushedFcn', ...
+                    @(~, ~) app.ExportSweepCsv(SweepResult));
+
+            uibutton(BtnRow, 'push', ...
+                'Text', 'Open Folder', ...
+                'ButtonPushedFcn', @(~, ~) openInFileBrowser(SweepResult.OutDir));
+
+            uibutton(BtnRow, 'push', 'Text', 'Close', ...
+                'ButtonPushedFcn', @(~, ~) delete(f));
+        end
+
+        % --- Export sweep summary ---
+        function ExportSweepCsv(app, SweepResult)
+
+            [file, path] = uiputfile('*.csv', ...
+                'Save Sweep Summary as CSV', ...
+                sprintf('WDS_Sweep_%s_%s.csv', ...
+                    SweepResult.Parameter, ...
+                    char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'))));
+
+            if ~ischar(file), return; end
+
+            try
+                T = createSweepSummaryTable(SweepResult);
+                writetable(T, fullfile(path, file));
+                uialert(app.UIFigure, ...
+                    'Sweep summary exported successfully!', ...
+                    'Export Success', 'Icon', 'success');
+            catch ME
+                uialert(app.UIFigure, ME.message, 'Export Error');
+            end
+        end
+
     end
 
     % Component Initialization
@@ -1887,11 +2386,25 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 'ButtonPushedFcn', @(btn, e) OpenExperimentSettings(app));
             placeIn(app.ExperimentSettingsButton, 1, 1);
 
-            app.SaveButton = uibutton(g, 'push', ...
-                'Text', 'Save Experiment...', ...
+            % Row 2: Save and Sweep side by side
+            Row2 = uigridlayout(g, [1 2]);
+            Row2.ColumnWidth = {'1x', '1x'};
+            Row2.Padding = [0 0 0 0];
+            Row2.ColumnSpacing = 3;
+            placeIn(Row2, 2, 1);
+
+            app.SaveButton = uibutton(Row2, 'push', ...
+                'Text', 'Save...', ...
+                'Tooltip', 'Save the current experiment (.wdsx)', ...
                 'Enable', 'off', ...
                 'ButtonPushedFcn', @(btn, e) SaveExperiment(app));
-            placeIn(app.SaveButton, 2, 1);
+            placeIn(app.SaveButton, 1, 1);
+
+            app.SweepButton = uibutton(Row2, 'push', ...
+                'Text', 'Sweep...', ...
+                'Tooltip', 'Run a parameter sensitivity sweep', ...
+                'ButtonPushedFcn', @(btn, e) RunSweep(app));
+            placeIn(app.SweepButton, 1, 2);
 
             app.ExperimentSummaryLabel = uilabel(g, ...
                 'Text', '', ...
@@ -2055,4 +2568,14 @@ end
 function placeIn(component, row, column)
     component.Layout.Row = row;
     component.Layout.Column = column;
+end
+
+function openInFileBrowser(folder)
+    if ispc
+        winopen(folder);
+    elseif ismac
+        system(sprintf('open "%s"', folder));
+    else
+        system(sprintf('xdg-open "%s" &', folder));
+    end
 end

@@ -39,7 +39,8 @@ function setupWDSOptimizer()
         'parallel'
         'experiments'
         'persistence'
-        'reporting'          % ← این خط اضافه شود
+        'reporting'
+        'sweep'              % ← این خط اضافه شود
         'tests'
         'studies'
     };
