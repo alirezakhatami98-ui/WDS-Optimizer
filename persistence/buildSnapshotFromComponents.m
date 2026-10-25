@@ -3,16 +3,20 @@ function Exp = buildSnapshotFromComponents( ...
     DUnit, Headloss, ...
     Settings, Config, Problem, ...
     ExperimentResult, BestAlgorithm, BestRunIndex, ...
-    NodePressures, PipeVelocities, HydraulicsConverged)
+    NodePressures, PipeVelocities, HydraulicsConverged, ...
+    Network)
 %BUILDSNAPSHOTFROMCOMPONENTS Build a saveable struct from explicit parts.
 %
-% This function has no dependency on the app object, so it can be used
-% by the sweep orchestrator and the Save Experiment method alike.
+% Network is optional. When provided, FormatVersion is 2 and the
+% topology is stored. When omitted, FormatVersion is 1 (legacy).
+
+    if nargin < 15
+        Network = [];
+    end
 
     Exp = struct();
-    Exp.FormatVersion = 1;
-    Exp.AppVersion    = '1.7.0';
-    Exp.Timestamp     = datetime('now');
+    Exp.AppVersion = '1.7.0';
+    Exp.Timestamp  = datetime('now');
 
     % ---- Environment ----
     inpContent  = readFileContent(InpFileStr);
@@ -64,4 +68,13 @@ function Exp = buildSnapshotFromComponents( ...
     Exp.Hydraulics.NodePressures  = NodePressures;
     Exp.Hydraulics.PipeVelocities = PipeVelocities;
     Exp.Hydraulics.Converged      = HydraulicsConverged;
+
+    % ---- Network (v2) ----
+    if ~isempty(Network) && isstruct(Network) && ...
+            isfield(Network, 'NodeIDs') && ~isempty(Network.NodeIDs)
+        Exp.FormatVersion = 2;
+        Exp.Network = Network;
+    else
+        Exp.FormatVersion = 1;
+    end
 end

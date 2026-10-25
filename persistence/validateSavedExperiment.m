@@ -11,7 +11,7 @@ function validateSavedExperiment(Exp)
         end
     end
 
-    if Exp.FormatVersion > 1
+    if Exp.FormatVersion > 2
         error('WDS:UnsupportedFormat', ...
             ['This file was saved with a newer format (v%d). ' ...
              'Update WDS Optimizer to open it.'], Exp.FormatVersion);
@@ -34,6 +34,22 @@ function validateSavedExperiment(Exp)
         if ~isfield(Exp.Best, RequiredBest{k})
             error('WDS:InvalidSavedExperiment', ...
                 'Best is missing field "%s".', RequiredBest{k});
+        end
+    end
+
+    % v2 requires Network topology
+    if Exp.FormatVersion >= 2
+        if ~isfield(Exp, 'Network') || isempty(Exp.Network)
+            error('WDS:InvalidSavedExperiment', ...
+                'v2 experiment is missing Network topology.');
+        end
+        RequiredNet = {'NodeIDs', 'NodeCoordinates', 'NodeTypes', ...
+                       'LinkIDs', 'LinkTypes', 'LinkNodes'};
+        for k = 1:numel(RequiredNet)
+            if ~isfield(Exp.Network, RequiredNet{k})
+                error('WDS:InvalidSavedExperiment', ...
+                    'Network is missing field "%s".', RequiredNet{k});
+            end
         end
     end
 end

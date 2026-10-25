@@ -119,6 +119,13 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         % Report
         ReportButton        matlab.ui.control.Button
 
+        % Network Map
+        NetworkTab                matlab.ui.container.Tab
+        NetworkMapAxes            matlab.ui.control.UIAxes
+        NetworkDisplayDropDown    matlab.ui.control.DropDown
+        NetworkShowLabelsCheck    matlab.ui.control.CheckBox
+        LastNetwork               struct = struct()
+
         % Sweep
         SweepButton          matlab.ui.control.Button
         SweepDialogFigure    matlab.ui.Figure
@@ -767,6 +774,13 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 % 2. Load the updated INP file in EPANET
                 [d, NP, L, InitialD] = initializeNetwork(tempInpPath);
 
+                % Extract network topology for map visualization + v2 snapshots
+                try
+                    app.LastNetwork = extractNetworkTopology(d);
+                catch
+                    app.LastNetwork = struct();
+                end
+
                 % 3. Units come from the network that is actually loaded
                 Units = detectNetworkUnits(d);
                 Units.DiameterFileUnit = app.DUnitDropDown.Value;
@@ -1025,6 +1039,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 'LineWidth', 1.5);
             ylabel(app.VelocityAxes, sprintf('Velocity (%s)', U.VelocityUnit));
             grid(app.VelocityAxes, 'on');
+
+            % Refresh network map tab
+            app.RefreshNetworkMap();
         end
 
         % --- Default experiment settings (used until the user applies others) ---
@@ -1440,6 +1457,14 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.DLabel.Text    = sprintf('%s (loaded)', Exp.Environment.DFileName);
             app.CostLabel.Text = sprintf('%s (loaded)', Exp.Environment.CostFileName);
 
+            % Restore network topology (v2) or leave empty (v1)
+            if isfield(Exp, 'Network') && ~isempty(Exp.Network) && ...
+                    isfield(Exp.Network, 'NodeIDs')
+                app.LastNetwork = Exp.Network;
+            else
+                app.LastNetwork = struct();
+            end
+
             % 2. Restore UI input fields from the saved experiment
             app.HeadlossDropDown.Value = Exp.Environment.Headloss;
             app.DUnitDropDown.Value    = Exp.Environment.DUnit;
@@ -1497,7 +1522,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 app.ExperimentResult, app.LastBestAlgorithm, ...
                 app.LastBestRunIndex, ...
                 app.NodePressures, app.PipeVelocities, ...
-                app.HydraulicsConverged);
+                app.HydraulicsConverged, ...
+                app.LastNetwork);                          % ← NEW
         end
 
         % --- Compare two saved experiments ---
@@ -1980,6 +2006,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 Environment.Headloss      = app.HeadlossDropDown.Value;
                 Environment.BaseSettings  = Settings;
                 Environment.OutDir        = SubFolder;
+                Environment.Network = app.LastNetwork;   % ← اضافه شود
 
                 SweepResult = runParameterSweep( ...
                     d, Problem, Config, BaseOptions, ...
@@ -2245,6 +2272,40 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             end
         end
 
+        % --- Refresh the Network Map tab ---
+        function RefreshNetworkMap(app)
+            ax = app.NetworkMapAxes;
+            if isempty(ax) || ~isvalid(ax)
+                return;
+            end
+
+            if isempty(app.LastNetwork) || ...
+                    ~isfield(app.LastNetwork, 'NodeIDs') || ...
+                    isempty(app.LastNetwork.NodeIDs) || ...
+                    isempty(app.OptimalDiameters) || ...
+                    isempty(app.LastProblem)
+                cla(ax, 'reset');
+                title(ax, 'Network Map: no topology available');
+                return;
+            end
+
+            Hydraulics.NodePressures  = app.NodePressures;
+            Hydraulics.PipeVelocities = app.PipeVelocities;
+            Hydraulics.Converged      = app.HydraulicsConverged;
+
+            Options.Mode           = app.NetworkDisplayDropDown.Value;
+            Options.ShowNodeLabels = app.NetworkShowLabelsCheck.Value;
+            Options.ShowViolations = true;
+
+            try
+                plotNetworkMap(ax, app.LastNetwork, Hydraulics, ...
+                    app.OptimalDiameters, app.LastProblem, Options);
+            catch ME
+                cla(ax, 'reset');
+                title(ax, sprintf('Map error: %s', ME.message));
+            end
+        end
+
     end
 
     % Component Initialization
@@ -2472,6 +2533,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.CostTab = uitab(app.TabGroup, 'Title', 'Best Design');
             app.HydraulicsTab = uitab(app.TabGroup, 'Title', 'Hydraulic Results');
             app.RunsTab = uitab(app.TabGroup, 'Title', 'All Runs');
+            app.NetworkTab = uitab(app.TabGroup, 'Title', 'Network Map');   % ← NEW
 
             % Tab: Experiment Summary
             g = uigridlayout(app.SummaryTab, [2 2]);
@@ -2545,6 +2607,38 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.UITableRuns = uitable(g, ...
                 'RowName', {}, 'ColumnSortable', true);
             placeIn(app.UITableRuns, 1, 1);
+
+            % Tab: Network Map
+            g = uigridlayout(app.NetworkTab, [2 1]);
+            g.RowHeight = {32, '1x'};
+            g.Padding = [8 8 8 8];
+            g.RowSpacing = 6;
+
+            Toolbar = uigridlayout(g, [1 3]);
+            Toolbar.ColumnWidth = {80, 200, '1x'};
+            Toolbar.Padding = [0 0 0 0];
+            Toolbar.ColumnSpacing = 6;
+            placeIn(Toolbar, 1, 1);
+
+            uilabel(Toolbar, 'Text', 'Display:', ...
+                'HorizontalAlignment', 'right');
+
+            app.NetworkDisplayDropDown = uidropdown(Toolbar, ...
+                'Items', {'Velocity', 'Pressure', 'Diameter', 'Violations Only'}, ...
+                'ItemsData', {'velocity', 'pressure', 'diameter', 'violations'}, ...
+                'Value', 'velocity', ...
+                'ValueChangedFcn', @(~,~) app.RefreshNetworkMap());
+            placeIn(app.NetworkDisplayDropDown, 1, 2);
+
+            app.NetworkShowLabelsCheck = uicheckbox(Toolbar, ...
+                'Text', 'Show node labels', ...
+                'Value', false, ...
+                'ValueChangedFcn', @(~,~) app.RefreshNetworkMap());
+            placeIn(app.NetworkShowLabelsCheck, 1, 3);
+
+            app.NetworkMapAxes = uiaxes(g);
+            placeIn(app.NetworkMapAxes, 2, 1);
+            title(app.NetworkMapAxes, 'Network Map (run an experiment first)');
 
         end
     end

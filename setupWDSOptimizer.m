@@ -40,6 +40,7 @@ function setupWDSOptimizer()
         'experiments'
         'persistence'
         'reporting'
+        'visualization'
         'sweep'              % ← این خط اضافه شود
         'tests'
         'studies'

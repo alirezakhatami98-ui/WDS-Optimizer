@@ -118,4 +118,30 @@ function exportReportFigures(Exp, figDir)
             'Resolution', 300);
         close(fig);
     end
+
+    % ---- Network map ----
+    if isfield(Exp, 'Network') && ~isempty(Exp.Network) && ...
+            isfield(Exp.Network, 'NodeIDs') && ...
+            isfield(Exp, 'Best') && isfield(Exp.Best, 'Position')
+        try
+            fig = figure('Visible', 'off', 'Color', 'w', ...
+                'Position', [100 100 900 700]);
+            ax = gca;
+
+            Hydraulics.NodePressures  = Exp.Hydraulics.NodePressures;
+            Hydraulics.PipeVelocities = Exp.Hydraulics.PipeVelocities;
+            Hydraulics.Converged      = Exp.Hydraulics.Converged;
+
+            Options.Mode = 'velocity';
+
+            plotNetworkMap(ax, Exp.Network, Hydraulics, ...
+                Exp.Best.Position, Exp.Problem, Options);
+
+            exportgraphics(fig, fullfile(figDir, 'network_map.png'), ...
+                'Resolution', 300);
+            close(fig);
+        catch
+            % Silent skip — map is optional
+        end
+    end
 end
