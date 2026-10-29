@@ -2265,13 +2265,22 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             plotSweepTrends(gt, SweepResult);
 
             % ---- Bottom buttons ----
-            BtnRow = uigridlayout(g, [1 4]);
-            BtnRow.ColumnWidth = {'1x', 160, 160, 100};
+            BtnRow = uigridlayout(g, [1 5]);
+            BtnRow.ColumnWidth = {'1x', 140, 160, 160, 100};
             BtnRow.Padding = [0 0 0 0];
             BtnRow.ColumnSpacing = 6;
             placeIn(BtnRow, 2, 1);
 
-            uilabel(BtnRow, 'Text', '');
+            uilabel(BtnRow, 'Text', '');  % spacer
+
+            uibutton(BtnRow, 'push', ...
+                'Text', 'Report...', ...
+                'Tooltip', 'Generate a comprehensive sweep report (Markdown + figures + data)', ...
+                'FontWeight', 'bold', ...
+                'BackgroundColor', [0.1 0.6 0.2], ...
+                'FontColor', 'w', ...
+                'ButtonPushedFcn', ...
+                    @(~, ~) app.GenerateSweepReport(SweepResult));
 
             uibutton(BtnRow, 'push', ...
                 'Text', 'Export CSV...', ...
@@ -2305,6 +2314,56 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                     'Export Success', 'Icon', 'success');
             catch ME
                 uialert(app.UIFigure, ME.message, 'Export Error');
+            end
+        end
+
+        % --- Generate comprehensive sweep report ---
+        function GenerateSweepReport(app, SweepResult)
+
+            if isempty(SweepResult) || ~isfield(SweepResult, 'Points')
+                uialert(app.UIFigure, ...
+                    'No sweep result available to report on.', ...
+                    'Nothing to Report');
+                return;
+            end
+
+            if ~any(strcmp({SweepResult.Points.Status}, 'Success'))
+                uialert(app.UIFigure, ...
+                    ['The sweep contains no successful points. ' ...
+                     'A report cannot be generated.'], ...
+                    'Nothing to Report');
+                return;
+            end
+
+            parentDir = uigetdir(pwd, ...
+                'Select folder to save the sweep report');
+            if isequal(parentDir, 0)
+                return;
+            end
+
+            app.StatusLabel.Text = 'Status: Generating sweep report...';
+            drawnow;
+
+            try
+                outDir = generateSweepReport(SweepResult, parentDir);
+
+                app.StatusLabel.Text = sprintf( ...
+                    'Status: Sweep report saved to %s.', outDir);
+
+                choice = uiconfirm(app.UIFigure, ...
+                    sprintf(['Sweep report generated successfully:\n\n%s\n\n' ...
+                             'Open the report folder?'], outDir), ...
+                    'Sweep Report Generated', ...
+                    'Options', {'Open Folder', 'Close'}, ...
+                    'DefaultOption', 1, 'CancelOption', 2);
+
+                if strcmp(choice, 'Open Folder')
+                    openInFileBrowser(outDir);
+                end
+
+            catch ME
+                app.StatusLabel.Text = 'Status: Sweep report generation failed.';
+                uialert(app.UIFigure, ME.message, 'Sweep Report Error');
             end
         end
 
