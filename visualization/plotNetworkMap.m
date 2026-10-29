@@ -1,17 +1,11 @@
 function plotNetworkMap(ax, Network, Hydraulics, Diameters, Problem, Options)
 %PLOTNETWORKMAP Render the water network with coloring by the chosen mode.
 %
-%   plotNetworkMap(ax, Network, Hydraulics, Diameters, Problem, Options)
-%
 %   Options fields (all optional):
-%     Mode           - 'velocity' (default) | 'pressure' | 'diameter' | 'violations'
+%     Mode           - 'preview' | 'velocity' | 'pressure' | 'diameter' | 'violations'
 %     ShowNodeLabels - true/false, default false
 %     ShowLinkLabels - true/false, default false
 %     ShowViolations - true/false, default true
-%
-%   Hydraulics must contain NodePressures (junction-only) and
-%   PipeVelocities (pipe-only). Problem.JunctionIndices maps local
-%   junction indices to global node indices.
 
     if nargin < 6 || isempty(Options)
         Options = struct();
@@ -43,6 +37,28 @@ function plotNetworkMap(ax, Network, Hydraulics, Diameters, Problem, Options)
     Y = Network.NodeCoordinates(:, 2);
     NP = Problem.NP;
 
+    % ---- Classify links ----
+    isPipeVec = false(nLinks, 1);
+    hasLinkTypes = isfield(Network, 'LinkTypes') && ...
+        numel(Network.LinkTypes) == nLinks;
+    if hasLinkTypes
+        for k = 1:nLinks
+            t = upper(char(Network.LinkTypes{k}));
+            isPipeVec(k) = strcmp(t, 'PIPE') || strcmp(t, 'CVPIPE');
+        end
+    else
+        isPipeVec(1:min(NP, nLinks)) = true;
+    end
+    pipeLinkIndices = find(isPipeVec);
+
+    % Map from link index -> pipe index (1..NP), 0 for non-pipes
+    pipeIdxForLink = zeros(nLinks, 1);
+    for i = 1:numel(pipeLinkIndices)
+        pipeIdxForLink(pipeLinkIndices(i)) = i;
+    end
+
+    isPreview = strcmpi(Mode, 'preview');
+
     % ---- Resolve color scheme ----
     [PipeFaceColors, PipeWidths, PipeCLims, PipeLabel, PipeCmap, ...
         NodeFaceColors, NodeCLims, NodeLabel, NodeCmap] = ...
@@ -50,18 +66,15 @@ function plotNetworkMap(ax, Network, Hydraulics, Diameters, Problem, Options)
                           nNodes, NP, Network);
 
     % ---- Draw links ----
-    IsPipe = false(nLinks, 1);
-    IsPipe(1:min(NP, nLinks)) = true;
-
     for k = 1:nLinks
         a = Network.LinkNodes(k, 1);
         b = Network.LinkNodes(k, 2);
 
-        if IsPipe(k)
-            c = PipeFaceColors(k, :);
-            w = PipeWidths(k);
+        if isPipeVec(k)
+            pi = pipeIdxForLink(k);
+            c = PipeFaceColors(pi, :);
+            w = PipeWidths(pi);
         else
-            % Pumps / valves / etc: neutral gray
             c = [0.45 0.45 0.45];
             w = 2.0;
         end
@@ -70,22 +83,32 @@ function plotNetworkMap(ax, Network, Hydraulics, Diameters, Problem, Options)
             'Color', c, 'LineWidth', w);
     end
 
-    % Fixed pipes overlay (dashed gray)
+    % ---- Fixed-pipe overlay ----
+    if isPreview
+        fixedColor = [0.95 0.55 0.10];
+        fixedWidth = 2.5;
+    else
+        fixedColor = [0.55 0.55 0.55];
+        fixedWidth = 1.1;
+    end
+
     if ~isempty(Problem.FixedPipes)
-        for k = Problem.FixedPipes(:)'
-            if k > nLinks, continue; end
+        for i = 1:numel(Problem.FixedPipes)
+            pi = Problem.FixedPipes(i);
+            if pi < 1 || pi > numel(pipeLinkIndices), continue; end
+            k = pipeLinkIndices(pi);
             a = Network.LinkNodes(k, 1);
             b = Network.LinkNodes(k, 2);
             plot(ax, [X(a) X(b)], [Y(a) Y(b)], '--', ...
-                'Color', [0.55 0.55 0.55], 'LineWidth', 1.1);
+                'Color', fixedColor, 'LineWidth', fixedWidth);
         end
     end
 
     % ---- Violation overlays ----
-    if ShowViol
-        % Velocity violations on pipes
-        for k = 1:min(NP, nLinks)
-            if Hydraulics.PipeVelocities(k) > Problem.Vmax
+    if ShowViol && ~isPreview
+        for i = 1:numel(pipeLinkIndices)
+            if Hydraulics.PipeVelocities(i) > Problem.Vmax
+                k = pipeLinkIndices(i);
                 a = Network.LinkNodes(k, 1);
                 b = Network.LinkNodes(k, 2);
                 plot(ax, [X(a) X(b)], [Y(a) Y(b)], ':', ...
@@ -110,11 +133,10 @@ function plotNetworkMap(ax, Network, Hydraulics, Diameters, Problem, Options)
         end
 
         fc = NodeFaceColors(k, :);
-
         ec = [0.20 0.20 0.20];
         lw = 1.0;
 
-        if ShowViol && Reverse(k) > 0 && ...
+        if ShowViol && ~isPreview && Reverse(k) > 0 && ...
                 Hydraulics.NodePressures(Reverse(k)) < Problem.Pmin
             ec = [0.85 0.10 0.10];
             lw = 2.5;
@@ -144,19 +166,27 @@ function plotNetworkMap(ax, Network, Hydraulics, Diameters, Problem, Options)
         end
     end
 
-    % ---- Legend (dummy handles) ----
+    % ---- Legend ----
     h_junc  = scatter(ax, nan, nan, 55,  [0.90 0.90 0.90], 'o', 'filled', ...
         'MarkerEdgeColor', [0.2 0.2 0.2], 'LineWidth', 1);
     h_res   = scatter(ax, nan, nan, 110, [0.20 0.70 0.30], 's', 'filled', ...
         'MarkerEdgeColor', [0.2 0.2 0.2], 'LineWidth', 1);
     h_tank  = scatter(ax, nan, nan, 130, [0.20 0.70 0.70], 'p', 'filled', ...
         'MarkerEdgeColor', [0.2 0.2 0.2], 'LineWidth', 1);
-    h_fixed = plot(ax, nan, nan, '--', 'Color', [0.55 0.55 0.55], 'LineWidth', 1.1);
-    h_viol  = plot(ax, nan, nan, ':',  'Color', [0.85 0.10 0.10], 'LineWidth', 2.0);
+    h_fixed = plot(ax, nan, nan, '--', 'Color', fixedColor, ...
+        'LineWidth', fixedWidth);
 
-    legend(ax, [h_junc, h_res, h_tank, h_fixed, h_viol], ...
-        {'Junction', 'Reservoir', 'Tank', 'Fixed pipe', 'Violation'}, ...
-        'Location', 'southoutside', 'Orientation', 'horizontal');
+    if isPreview
+        legend(ax, [h_junc, h_res, h_tank, h_fixed], ...
+            {'Junction', 'Reservoir', 'Tank', 'Fixed pipe'}, ...
+            'Location', 'southoutside', 'Orientation', 'horizontal');
+    else
+        h_viol = plot(ax, nan, nan, ':', ...
+            'Color', [0.85 0.10 0.10], 'LineWidth', 2.0);
+        legend(ax, [h_junc, h_res, h_tank, h_fixed, h_viol], ...
+            {'Junction', 'Reservoir', 'Tank', 'Fixed pipe', 'Violation'}, ...
+            'Location', 'southoutside', 'Orientation', 'horizontal');
+    end
 
     hold(ax, 'off');
 
@@ -168,12 +198,13 @@ function plotNetworkMap(ax, Network, Hydraulics, Diameters, Problem, Options)
         'velocity',   'Velocity', ...
         'pressure',   'Pressure', ...
         'diameter',   'Diameter', ...
-        'violations', 'Violations');
+        'violations', 'Violations', ...
+        'preview',    'Preview — click a pipe to toggle fixed status');
     if isfield(ModeNames, Mode)
         title(ax, sprintf('Network Map (%s)', ModeNames.(Mode)));
     end
 
-    % ---- Colorbar (pipe or node, not both) ----
+    % ---- Colorbar ----
     if ~isempty(PipeCLims) && ~isempty(PipeCmap)
         colormap(ax, PipeCmap);
         setColorLimits(ax, PipeCLims);
@@ -184,6 +215,17 @@ function plotNetworkMap(ax, Network, Hydraulics, Diameters, Problem, Options)
         setColorLimits(ax, NodeCLims);
         cb = colorbar(ax, 'eastoutside');
         ylabel(cb, NodeLabel);
+    end
+
+    % ---- Enable click-through in preview mode ----
+    if isPreview
+        children = ax.Children;
+        for i = 1:numel(children)
+            try
+                children(i).PickableParts = 'none';
+            catch
+            end
+        end
     end
 end
 
@@ -210,7 +252,6 @@ end
 function [PFc, PW, PCl, PLb, PCm, NFc, NCl, NLb, NCm] = ...
     buildColorContext(Mode, H, D, P, nNodes, NP, Network)
 
-    % Defaults
     PFc = repmat([0.7 0.7 0.7], max(NP, 1), 1);
     PW  = 1.5 * ones(max(NP, 1), 1);
     PCl = []; PCm = []; PLb = '';
@@ -224,7 +265,6 @@ function [PFc, PW, PCl, PLb, PCm, NFc, NCl, NLb, NCm] = ...
         U.DiameterUnit = 'mm';
     end
 
-    % Pipe widths always scale with diameter
     if ~isempty(D)
         dmin = min(D); dmax = max(D);
         if dmax > dmin
@@ -234,13 +274,20 @@ function [PFc, PW, PCl, PLb, PCm, NFc, NCl, NLb, NCm] = ...
         end
     end
 
-    % Junction pressure map (for any mode that uses node colors)
     Reverse = zeros(nNodes, 1);
     if isfield(P, 'JunctionIndices')
         Reverse(P.JunctionIndices) = 1:numel(P.JunctionIndices);
     end
 
     switch lower(Mode)
+        case 'preview'
+            PFc = repmat([0.62 0.62 0.62], max(NP, 1), 1);
+            NFc = repmat([0.92 0.92 0.92], nNodes, 1);
+            isRes = strcmpi(Network.NodeTypes, 'RESERVOIR');
+            isTk  = strcmpi(Network.NodeTypes, 'TANK');
+            NFc(isRes, :) = repmat([0.2 0.7 0.3], sum(isRes), 1);
+            NFc(isTk,  :) = repmat([0.2 0.7 0.7], sum(isTk),  1);
+
         case 'velocity'
             V = H.PipeVelocities(:);
             if isempty(V), return; end
@@ -268,7 +315,6 @@ function [PFc, PW, PCl, PLb, PCm, NFc, NCl, NLb, NCm] = ...
                     NFc(k, :) = valueToColor(Vp(li), NCl, NCm);
                 end
             end
-            % Reservoir/tank overrides
             isRes = strcmpi(Network.NodeTypes, 'RESERVOIR');
             isTk  = strcmpi(Network.NodeTypes, 'TANK');
             NFc(isRes, :) = repmat([0.2 0.7 0.3], sum(isRes), 1);
@@ -283,7 +329,6 @@ function [PFc, PW, PCl, PLb, PCm, NFc, NCl, NLb, NCm] = ...
             PFc = valueToColor(D(:), PCl, PCm);
 
         case 'violations'
-            % Neutral everything
             PFc = repmat([0.75 0.75 0.75], max(NP, 1), 1);
             NFc = repmat([0.92 0.92 0.92], nNodes, 1);
             isRes = strcmpi(Network.NodeTypes, 'RESERVOIR');
@@ -306,20 +351,20 @@ end
 
 function m = cmapVelocity(n)
     anchors = [ ...
-        0.00, 0.25, 0.70, 0.30;   % green
-        0.50, 0.90, 0.90, 0.20;   % yellow
-        0.85, 0.95, 0.55, 0.10;   % orange
-        1.00, 0.85, 0.10, 0.10];  % red
+        0.00, 0.25, 0.70, 0.30;
+        0.50, 0.90, 0.90, 0.20;
+        0.85, 0.95, 0.55, 0.10;
+        1.00, 0.85, 0.10, 0.10];
     m = interpColormap(anchors, n);
 end
 
 function m = cmapPressure(n)
     anchors = [ ...
-        0.00, 0.85, 0.10, 0.10;   % red (very low)
-        0.25, 0.95, 0.55, 0.10;   % orange
-        0.50, 0.90, 0.90, 0.20;   % yellow
-        0.75, 0.30, 0.70, 0.30;   % green
-        1.00, 0.15, 0.40, 0.80];  % blue
+        0.00, 0.85, 0.10, 0.10;
+        0.25, 0.95, 0.55, 0.10;
+        0.50, 0.90, 0.90, 0.20;
+        0.75, 0.30, 0.70, 0.30;
+        1.00, 0.15, 0.40, 0.80];
     m = interpColormap(anchors, n);
 end
 

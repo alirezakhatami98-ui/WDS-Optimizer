@@ -1,5 +1,5 @@
 function Network = extractNetworkTopology(d)
-%EXTRACTNETWORKTOPOLOGY Read node coordinates and link topology from EPANET.
+%EXTRACTNETWORKTOPOLOGY Read node coordinates, topology, and link properties.
 %
 % Returns an empty struct() when coordinates are unavailable so that
 % callers can fall back to a v1 snapshot.
@@ -26,7 +26,27 @@ function Network = extractNetworkTopology(d)
     Network.NodeIDs         = d.getNodeNameID();
     Network.NodeCoordinates = [X, Y];
     Network.NodeTypes       = d.getNodeType();
+
     Network.LinkIDs         = d.getLinkNameID();
     Network.LinkTypes       = d.getLinkType();
     Network.LinkNodes       = d.getLinkNodesIndex();
+
+    % Pipe/link physical properties (used for preview rendering)
+    try
+        Network.LinkDiameters = d.getLinkDiameter();
+    catch
+        Network.LinkDiameters = [];
+    end
+
+    try
+        Network.LinkLengths = d.getLinkLength();
+    catch
+        Network.LinkLengths = [];
+    end
+
+    try
+        Network.LinkRoughness = d.getLinkRoughnessCoeff();
+    catch
+        Network.LinkRoughness = [];
+    end
 end

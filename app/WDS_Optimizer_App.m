@@ -124,7 +124,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
         NetworkMapAxes            matlab.ui.control.UIAxes
         NetworkDisplayDropDown    matlab.ui.control.DropDown
         NetworkShowLabelsCheck    matlab.ui.control.CheckBox
+        NetworkClearFixedButton   matlab.ui.control.Button
         LastNetwork               struct = struct()
+        LastValidFixedPipes char = ''
 
         % Sweep
         SweepButton          matlab.ui.control.Button
@@ -174,14 +176,37 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             try
                 app.NetworkUnits = detectNetworkUnitsFromFile(app.InpFileStr);
                 app.ApplyUnitLabels();
+
+                % Extract topology from a temp copy (same as PrepareEnvironment)
+                app.LastNetwork = struct();
+                tmpPath = '';
+                dTmp = [];
+                try
+                    tmpPath = createTempInpFile(app.InpFileStr);
+                    [dTmp, ~, ~, ~] = initializeNetwork(tmpPath);
+                    app.LastNetwork = extractNetworkTopology(dTmp);
+                catch ME2
+                    disp(getReport(ME2));   % موقت برای تشخیص
+                    app.LastNetwork = struct();
+                end
+                cleanupEpanetObject(dTmp);
+                cleanupTempInpFiles(tmpPath);
+
+                app.NetworkDisplayDropDown.Value = 'preview';
+                app.RefreshNetworkMap();
+
+                if isfield(app.LastNetwork, 'NodeIDs')
+                    app.TabGroup.SelectedTab = app.NetworkTab;
+                end
+
                 app.StatusLabel.Text = 'Status: Ready';
             catch ME
                 app.NetworkUnits = [];
+                app.LastNetwork = struct();
                 app.ApplyUnitLabels();
                 app.StatusLabel.Text = 'Status: Could not read network units';
                 uialert(app.UIFigure, ME.message, 'Network Units Error');
             end
-
         end
 
         function ApplyUnitLabels(app)
@@ -479,6 +504,10 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 %% 9. Update hydraulic results and check convergence
 
                 Hydraulics = app.ComputeHydraulicResults(d, BestRun.Position, Problem);
+
+                app.LastProblem         = Problem;     % ← NEW: before DisplayResults
+                app.HydraulicsConverged = Hydraulics.Converged;   % ← NEW
+
                 app.DisplayResults(BestRun.Score, BestRun.Position, Problem, ...
                     Hydraulics, BestRun.Feasible);
 
@@ -1040,8 +1069,14 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             ylabel(app.VelocityAxes, sprintf('Velocity (%s)', U.VelocityUnit));
             grid(app.VelocityAxes, 'on');
 
+            % Auto-switch to velocity view when results become available
+            if strcmp(app.NetworkDisplayDropDown.Value, 'preview')
+                app.NetworkDisplayDropDown.Value = 'velocity';
+            end
+
             % Refresh network map tab
             app.RefreshNetworkMap();
+
         end
 
         % --- Default experiment settings (used until the user applies others) ---
@@ -1474,6 +1509,7 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             app.NSEditField.Value         = Exp.Config.NS;
             app.MaxGenEditField.Value     = Exp.Config.MaxGen;
             app.FixedPipesEditField.Value = formatPipeList(Exp.Problem.FixedPipes);
+            app.LastValidFixedPipes = app.FixedPipesEditField.Value;
 
             app.ExperimentSettings = Exp.Settings;
             app.RefreshExperimentSettingsLabel();
@@ -2281,29 +2317,300 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
 
             if isempty(app.LastNetwork) || ...
                     ~isfield(app.LastNetwork, 'NodeIDs') || ...
-                    isempty(app.LastNetwork.NodeIDs) || ...
-                    isempty(app.OptimalDiameters) || ...
-                    isempty(app.LastProblem)
+                    isempty(app.LastNetwork.NodeIDs)
                 cla(ax, 'reset');
-                title(ax, 'Network Map: no topology available');
+                title(ax, 'Network Map: load an .INP file to preview');
+                try
+                    ax.ButtonDownFcn = [];
+                catch
+                end
                 return;
             end
 
-            Hydraulics.NodePressures  = app.NodePressures;
-            Hydraulics.PipeVelocities = app.PipeVelocities;
-            Hydraulics.Converged      = app.HydraulicsConverged;
+            Network = app.LastNetwork;
 
-            Options.Mode           = app.NetworkDisplayDropDown.Value;
-            Options.ShowNodeLabels = app.NetworkShowLabelsCheck.Value;
-            Options.ShowViolations = true;
+            isPipeVec = false(numel(Network.LinkTypes), 1);
+            for k = 1:numel(Network.LinkTypes)
+                t = upper(char(Network.LinkTypes{k}));
+                isPipeVec(k) = strcmp(t, 'PIPE') || strcmp(t, 'CVPIPE');
+            end
+            NP = sum(isPipeVec);
+
+            Mode = app.NetworkDisplayDropDown.Value;
+
+            % Decide whether to render in preview or result mode
+            hasExperiment = ~isempty(app.LastProblem) && ...
+                isfield(app.LastProblem, 'NP') && ...
+                ~isempty(app.OptimalDiameters);
+
+            if strcmp(Mode, 'preview') || ~hasExperiment
+
+                % Build a lightweight "PreviewProblem"
+                PPreview.NP              = NP;
+                PPreview.JunctionIndices = find(strcmpi(Network.NodeTypes, 'JUNCTION'));
+                PPreview.Pmin            = app.PminEditField.Value;
+                PPreview.Vmax            = app.VmaxEditField.Value;
+                PPreview.Units           = app.NetworkUnits;
+
+                if isempty(PPreview.Units)
+                    PPreview.Units.DiameterUnit = 'mm';
+                    PPreview.Units.VelocityUnit = 'm/s';
+                    PPreview.Units.PressureUnit = 'm';
+                end
+
+                try
+                    PPreview.FixedPipes = validateFixedPipes( ...
+                        app.FixedPipesEditField.Value, NP);
+                catch
+                    PPreview.FixedPipes = [];   % map stays visible; alert is handled in OnFixedPipesChanged
+                end
+
+                if isfield(Network, 'LinkDiameters') && ...
+                        numel(Network.LinkDiameters) == numel(Network.LinkIDs)
+                    PPreview.InitialD = Network.LinkDiameters(isPipeVec);
+                else
+                    PPreview.InitialD = ones(NP, 1);
+                end
+
+                Hydraulics.NodePressures  = nan(numel(PPreview.JunctionIndices), 1);
+                Hydraulics.PipeVelocities = nan(NP, 1);
+                Hydraulics.Converged      = false;
+
+                Diameters = PPreview.InitialD;
+
+                Options.Mode           = 'preview';
+                Options.ShowNodeLabels = app.NetworkShowLabelsCheck.Value;
+                Options.ShowViolations = false;
+
+                PProblem = PPreview;
+            else
+                Hydraulics.NodePressures  = app.NodePressures;
+                Hydraulics.PipeVelocities = app.PipeVelocities;
+                Hydraulics.Converged      = app.HydraulicsConverged;
+                Diameters                 = app.OptimalDiameters;
+                PProblem                  = app.LastProblem;
+
+                Options.Mode           = Mode;
+                Options.ShowNodeLabels = app.NetworkShowLabelsCheck.Value;
+                Options.ShowViolations = true;
+            end
 
             try
-                plotNetworkMap(ax, app.LastNetwork, Hydraulics, ...
-                    app.OptimalDiameters, app.LastProblem, Options);
+                plotNetworkMap(ax, Network, Hydraulics, Diameters, ...
+                    PProblem, Options);
             catch ME
                 cla(ax, 'reset');
                 title(ax, sprintf('Map error: %s', ME.message));
+                try
+                    ax.ButtonDownFcn = [];
+                catch
+                end
+                return;
             end
+
+            % Wire / unwire click handler
+            if strcmp(Options.Mode, 'preview')
+                try
+                    ax.PickableParts = 'all';        % کلیک حتی با axis off
+                    ax.HitTest       = 'on';
+                    disableDefaultInteractivity(ax); % جلوگیری از بلعیده شدن کلیک
+                    ax.ButtonDownFcn = @(src, evt) app.HandleMapClick();
+                catch
+                    ax.ButtonDownFcn = [];
+                end
+            else
+                try
+                    ax.ButtonDownFcn = [];
+                    enableDefaultInteractivity(ax);
+                catch
+                end
+            end
+        end
+
+        % --- Map click handler (Preview mode) ---
+        function HandleMapClick(app)
+            ax = app.NetworkMapAxes;
+            if isempty(ax) || ~isvalid(ax), return; end
+
+            cp = ax.CurrentPoint;
+            if isempty(cp), return; end
+            px = cp(1, 1);
+            py = cp(1, 2);
+
+            Network = app.LastNetwork;
+            if isempty(Network) || ~isfield(Network, 'NodeIDs'), return; end
+
+            X = Network.NodeCoordinates(:, 1);
+            Y = Network.NodeCoordinates(:, 2);
+            LinkNodes = Network.LinkNodes;
+
+            isPipeVec = false(numel(Network.LinkTypes), 1);
+            for k = 1:numel(Network.LinkTypes)
+                t = upper(char(Network.LinkTypes{k}));
+                isPipeVec(k) = strcmp(t, 'PIPE') || strcmp(t, 'CVPIPE');
+            end
+            pipeLinkIndices = find(isPipeVec);
+
+            % Nearest pipe
+            bestLinkDist = Inf;
+            bestLinkIdx = 0;
+            for i = 1:numel(pipeLinkIndices)
+                k = pipeLinkIndices(i);
+                a = LinkNodes(k, 1);
+                b = LinkNodes(k, 2);
+                d = distanceToSegment(px, py, X(a), Y(a), X(b), Y(b));
+                if d < bestLinkDist
+                    bestLinkDist = d;
+                    bestLinkIdx = k;
+                end
+            end
+
+            % Nearest node
+            bestNodeDist = Inf;
+            bestNodeIdx = 0;
+            for k = 1:numel(X)
+                d = hypot(px - X(k), py - Y(k));
+                if d < bestNodeDist
+                    bestNodeDist = d;
+                    bestNodeIdx = k;
+                end
+            end
+
+            % Tolerances in data units
+            span    = max(diff(ax.XLim), diff(ax.YLim));
+            tolNode = 0.02 * span;   % گره: شعاع کوچک ولی با اولویت بالا
+            tolLink = 0.02 * span;   % لوله
+
+            % Nodes take priority over pipes
+            if bestNodeDist < tolNode
+                app.ShowNodeInfo(bestNodeIdx);
+            elseif bestLinkDist < tolLink && bestLinkIdx > 0
+                app.ToggleFixedPipe(bestLinkIdx);
+            end
+        end
+
+        % --- Show node info dialog ---
+        function ShowNodeInfo(app, nodeIdx)
+            Network = app.LastNetwork;
+            if isempty(Network) || nodeIdx < 1 || nodeIdx > numel(Network.NodeIDs)
+                return;
+            end
+
+            id   = char(Network.NodeIDs{nodeIdx});
+            type = char(Network.NodeTypes{nodeIdx});
+            coords = Network.NodeCoordinates(nodeIdx, :);
+
+            msg = sprintf( ...
+                'Node ID: %s\nType: %s\nCoordinates: (%.2f, %.2f)', ...
+                id, type, coords(1), coords(2));
+
+            uialert(app.UIFigure, msg, 'Node Info', 'Icon', 'info');
+        end
+
+        % --- Toggle a pipe in the fixed-pipes list ---
+        function ToggleFixedPipe(app, linkIdx)
+            Network = app.LastNetwork;
+            if isempty(Network) || ~isfield(Network, 'LinkTypes'), return; end
+
+            isPipeVec = false(numel(Network.LinkTypes), 1);
+            for k = 1:numel(Network.LinkTypes)
+                t = upper(char(Network.LinkTypes{k}));
+                isPipeVec(k) = strcmp(t, 'PIPE') || strcmp(t, 'CVPIPE');
+            end
+            pipeLinkIndices = find(isPipeVec);
+            NP = numel(pipeLinkIndices);
+
+            pipeIdx = find(pipeLinkIndices == linkIdx, 1);
+            if isempty(pipeIdx), return; end
+
+            try
+                current = validateFixedPipes(app.FixedPipesEditField.Value, NP);
+            catch
+                current = [];
+            end
+
+            if ismember(pipeIdx, current)
+                current = setdiff(current, pipeIdx);
+            else
+                current = sort([current, pipeIdx]);
+            end
+
+            app.FixedPipesEditField.Value = formatPipeList(current);
+            app.LastValidFixedPipes = app.FixedPipesEditField.Value;
+
+            % Show a hint about re-running if results already exist
+            if ~isempty(app.LastProblem)
+                app.StatusLabel.Text = ...
+                    'Status: Fixed pipes updated. Re-run to apply changes.';
+            else
+                app.StatusLabel.Text = 'Status: Fixed pipes updated.';
+            end
+
+            % Pipe info in status bar
+            info = sprintf('Pipe %d (ID %s)', pipeIdx, char(Network.LinkIDs{linkIdx}));
+            if isfield(Network, 'LinkLengths') && numel(Network.LinkLengths) >= linkIdx
+                info = sprintf('%s | L = %.1f', info, Network.LinkLengths(linkIdx));
+            end
+            if isfield(Network, 'LinkDiameters') && numel(Network.LinkDiameters) >= linkIdx
+                info = sprintf('%s | D = %.1f', info, Network.LinkDiameters(linkIdx));
+            end
+            if ismember(pipeIdx, current)
+                state = 'FIXED';
+            else
+                state = 'variable';
+            end
+            app.StatusLabel.Text = sprintf('Status: %s | %s', info, state);
+
+            app.RefreshNetworkMap();
+        end
+
+        % --- Clear all fixed pipes ---
+        function ClearFixedPipes(app)
+            app.FixedPipesEditField.Value = '';
+            app.LastValidFixedPipes = app.FixedPipesEditField.Value;
+            if ~isempty(app.LastProblem)
+                app.StatusLabel.Text = ...
+                    'Status: Fixed pipes cleared. Re-run to apply changes.';
+            else
+                app.StatusLabel.Text = 'Status: Fixed pipes cleared.';
+            end
+            app.RefreshNetworkMap();
+        end
+
+        % --- Validate fixed-pipes field on edit; revert on invalid input ---
+        function OnFixedPipesChanged(app)
+
+            NP = [];
+            if ~isempty(app.LastNetwork) && isfield(app.LastNetwork, 'LinkTypes')
+                isPipeVec = false(numel(app.LastNetwork.LinkTypes), 1);
+                for k = 1:numel(app.LastNetwork.LinkTypes)
+                    t = upper(char(app.LastNetwork.LinkTypes{k}));
+                    isPipeVec(k) = strcmp(t, 'PIPE') || strcmp(t, 'CVPIPE');
+                end
+                NP = sum(isPipeVec);
+            end
+
+            % Without a loaded network there is nothing to validate against
+            if isempty(NP)
+                app.LastValidFixedPipes = app.FixedPipesEditField.Value;
+                return;
+            end
+
+            try
+                validateFixedPipes(app.FixedPipesEditField.Value, NP);
+                app.LastValidFixedPipes = app.FixedPipesEditField.Value;
+            catch ME
+                % Revert to the last valid value and keep the map untouched
+                app.FixedPipesEditField.Value = app.LastValidFixedPipes;
+                uialert(app.UIFigure, ...
+                    sprintf(['Invalid fixed pipe list: %s\n\n' ...
+                            'Pipe IDs must be between 1 and %d.'], ...
+                            ME.message, NP), ...
+                    'Invalid Fixed Pipes');
+                return;
+            end
+
+            app.RefreshNetworkMap();
         end
 
     end
@@ -2431,6 +2738,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             placeIn(app.FixedPipesLabel, 3, 1);
             app.FixedPipesEditField = uieditfield(g, 'text', 'Value', '');
             placeIn(app.FixedPipesEditField, 3, 2);
+            app.FixedPipesEditField.ValueChangedFcn = ...
+                @(~,~) app.OnFixedPipesChanged();
 
             % 4. Experiment
             ExpPanel = uipanel(LeftGrid, ...
@@ -2614,8 +2923,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
             g.Padding = [8 8 8 8];
             g.RowSpacing = 6;
 
-            Toolbar = uigridlayout(g, [1 3]);
-            Toolbar.ColumnWidth = {80, 200, '1x'};
+            Toolbar = uigridlayout(g, [1 4]);
+            Toolbar.ColumnWidth = {80, 200, '1x', 160};
             Toolbar.Padding = [0 0 0 0];
             Toolbar.ColumnSpacing = 6;
             placeIn(Toolbar, 1, 1);
@@ -2624,9 +2933,9 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 'HorizontalAlignment', 'right');
 
             app.NetworkDisplayDropDown = uidropdown(Toolbar, ...
-                'Items', {'Velocity', 'Pressure', 'Diameter', 'Violations Only'}, ...
-                'ItemsData', {'velocity', 'pressure', 'diameter', 'violations'}, ...
-                'Value', 'velocity', ...
+                'Items', {'Preview', 'Velocity', 'Pressure', 'Diameter', 'Violations Only'}, ...
+                'ItemsData', {'preview', 'velocity', 'pressure', 'diameter', 'violations'}, ...
+                'Value', 'preview', ...
                 'ValueChangedFcn', @(~,~) app.RefreshNetworkMap());
             placeIn(app.NetworkDisplayDropDown, 1, 2);
 
@@ -2635,6 +2944,12 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 'Value', false, ...
                 'ValueChangedFcn', @(~,~) app.RefreshNetworkMap());
             placeIn(app.NetworkShowLabelsCheck, 1, 3);
+
+            app.NetworkClearFixedButton = uibutton(Toolbar, 'push', ...
+                'Text', 'Clear Fixed Pipes', ...
+                'Tooltip', 'Remove all fixed pipe selections', ...
+                'ButtonPushedFcn', @(~,~) app.ClearFixedPipes());
+            placeIn(app.NetworkClearFixedButton, 1, 4);
 
             app.NetworkMapAxes = uiaxes(g);
             placeIn(app.NetworkMapAxes, 2, 1);
