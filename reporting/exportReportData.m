@@ -47,4 +47,48 @@ function exportReportData(Exp, dataDir)
     exportResultsToExcel(pipeTable, nodeTable, ...
         fullfile(dataDir, 'results.xlsx'), ...
         Exp.ExperimentResult, SummaryTable, RunsTable, Prb.Units);
+
+    % ---- Statistical summary ----
+    statPath = fullfile(dataDir, 'statistical_summary.txt');
+    fid = fopen(statPath, 'w');
+    if fid >= 0
+        fprintf(fid, 'WDS Optimizer Statistical Summary\n');
+        fprintf(fid, '=================================\n\n');
+        fprintf(fid, 'Best cost           : %.4f\n', Exp.Best.Score);
+
+        AlgsAll = C.Algorithms;
+        allFeasibleCosts = [];
+        TotalRuns = 0;
+        FeasRuns = 0;
+        for a = 1:numel(AlgsAll)
+            Runs = Exp.ExperimentResult.Results.(AlgsAll{a}).Runs;
+            TotalRuns = TotalRuns + numel(Runs);
+            for r = 1:numel(Runs)
+                if strcmp(Runs(r).Status, 'Success') && ...
+                        logical(Runs(r).Feasible) && isfinite(Runs(r).Score)
+                    FeasRuns = FeasRuns + 1;
+                    allFeasibleCosts = [allFeasibleCosts; Runs(r).Score]; %#ok<AGROW>
+                end
+            end
+        end
+
+        if numel(allFeasibleCosts) >= 3
+            [ciLo, ciHi] = bootstrapCI(allFeasibleCosts, @mean, 0.05, 2000, 42);
+            if isfinite(ciLo)
+                fprintf(fid, 'Mean feasible cost  : %.4f (95%% bootstrap CI: [%.4f, %.4f])\n', ...
+                    mean(allFeasibleCosts), ciLo, ciHi);
+            end
+        end
+
+        if TotalRuns > 0
+            [wilLo, wilHi] = wilsonCI(FeasRuns, TotalRuns, 0.05);
+            fprintf(fid, 'Feasibility rate    : %.1f%% (%d/%d, 95%% Wilson CI: [%.1f%%, %.1f%%])\n', ...
+                100 * FeasRuns / TotalRuns, FeasRuns, TotalRuns, ...
+                100*wilLo, 100*wilHi);
+        end
+
+        fprintf(fid, '\nBootstrap: 2000 resamples, seed 42, percentile method.\n');
+        fprintf(fid, 'Wilson: 95%% two-sided score interval.\n');
+        fclose(fid);
+    end
 end

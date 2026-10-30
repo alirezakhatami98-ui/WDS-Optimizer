@@ -129,6 +129,23 @@ function md = buildReportMarkdown(Exp)
     % ---------------- Section 5: Results ----------------
     md(end+1, 1) = "## 5. Results";
     md(end+1, 1) = "";
+
+    AlgsAll = C.Algorithms;
+    allFeasibleCosts = [];
+    TotalRuns = 0;
+    FeasRuns = 0;
+    for a = 1:numel(AlgsAll)
+        Runs = Exp.ExperimentResult.Results.(AlgsAll{a}).Runs;
+        TotalRuns = TotalRuns + numel(Runs);
+        for r = 1:numel(Runs)
+            if strcmp(Runs(r).Status, 'Success') && ...
+                    logical(Runs(r).Feasible) && isfinite(Runs(r).Score)
+                FeasRuns = FeasRuns + 1;
+                allFeasibleCosts = [allFeasibleCosts; Runs(r).Score]; %#ok<AGROW>
+            end
+        end
+    end
+
     md(end+1, 1) = sprintf("**Best cost**: %.2f", Exp.Best.Score);
     if Exp.Best.Feasible
         md(end+1, 1) = "**Status**: ✅ Feasible design";
@@ -137,6 +154,25 @@ function md = buildReportMarkdown(Exp)
     end
     md(end+1, 1) = sprintf("**Best algorithm**: %s (run %d)", ...
         Exp.Best.Algorithm, Exp.Best.RunIndex);
+
+    if TotalRuns > 0
+        pFeas = FeasRuns / TotalRuns;
+        [wilLo, wilHi] = wilsonCI(FeasRuns, TotalRuns, 0.05);
+        if isfinite(wilLo)
+            md(end+1, 1) = sprintf( ...
+                "**Feasibility rate**: %.1f%% (%d/%d, 95%% Wilson CI: [%.1f%%, %.1f%%])", ...
+                100*pFeas, FeasRuns, TotalRuns, 100*wilLo, 100*wilHi);
+        end
+    end
+
+    if numel(allFeasibleCosts) >= 3
+        [ciLo, ciHi] = bootstrapCI(allFeasibleCosts, @mean, 0.05, 2000, 42);
+        if isfinite(ciLo)
+            md(end+1, 1) = sprintf( ...
+                "**Mean feasible cost**: %.2f (95%% bootstrap CI: [%.2f, %.2f])", ...
+                mean(allFeasibleCosts), ciLo, ciHi);
+        end
+    end
     md(end+1, 1) = "";
     md(end+1, 1) = "### Per-Algorithm Statistics";
     md(end+1, 1) = "";
@@ -238,6 +274,7 @@ function md = buildReportMarkdown(Exp)
     md(end+1, 1) = "| `data/all_runs.csv` | Every run with seed, status, cost |";
     md(end+1, 1) = "| `data/convergence_raw.csv` | Per-generation mean/min/max |";
     md(end+1, 1) = "";
+    md(end+1, 1) = "| `data/statistical_summary.txt` | Bootstrap CIs and Wilson CI for feasibility |";
 
     % ---------------- Footer ----------------
     md(end+1, 1) = "---";

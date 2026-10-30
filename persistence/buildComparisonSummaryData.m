@@ -70,6 +70,49 @@ function [Data, SectionRows] = buildComparisonSummaryData(ExpA, ExpB, NameA, Nam
         addRow('Std Time (s)', SA.StdTime, SB.StdTime);
     end
 
+    % ---- Statistical comparison (B - A) per common algorithm ----
+    CommonAlgs = AllAlgs(ismember(AllAlgs, AlgsA) & ismember(AllAlgs, AlgsB));
+
+    for k = 1:numel(CommonAlgs)
+        Alg = CommonAlgs{k};
+        RunsA = ExpA.ExperimentResult.Results.(Alg).Runs;
+        RunsB = ExpB.ExperimentResult.Results.(Alg).Runs;
+        S = computeAlgorithmComparisonStats(RunsA, RunsB);
+
+        addSection(sprintf('%s: Statistical Comparison', Alg));
+
+        % One-line verdict
+        if isfinite(S.PValue)
+            if S.Significant
+                if S.Median_B < S.Median_A
+                    verdict = sprintf('B outperforms A (p = %.4g, d = %+.2f %s)', ...
+                        S.PValue, S.CohensD, S.EffectSize);
+                else
+                    verdict = sprintf('A outperforms B (p = %.4g, d = %+.2f %s)', ...
+                        S.PValue, S.CohensD, S.EffectSize);
+                end
+            else
+                verdict = sprintf('No significant difference (p = %.4g)', S.PValue);
+            end
+        else
+            verdict = 'Insufficient samples (need n>=5 per group)';
+        end
+        addRow('Verdict', verdict, '');
+
+        addRow('Sample size (A, B)', S.N_A, S.N_B);
+        addRow('Median cost (A, B)', S.Median_A, S.Median_B);
+        addRow('Mann-Whitney p-value', S.PValue, '');
+        addRow('Cohen''s d', S.CohensD, S.EffectSize);
+
+        if isfinite(S.DeltaMedianCI_Low)
+            ciTxt = sprintf('[%+.2f, %+.2f]', ...
+                S.DeltaMedianCI_Low, S.DeltaMedianCI_High);
+        else
+            ciTxt = '—';
+        end
+        addRow('Δ median cost 95% CI', ciTxt, '');
+    end
+
     % ---------------- nested helpers ----------------
 
     function addRow(metric, valA, valB)

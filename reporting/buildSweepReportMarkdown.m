@@ -17,6 +17,10 @@ function md = buildSweepReportMarkdown(SweepResult, BaseExp)
         candidates = [];
     end
 
+    % Compute per-point bootstrap CI (loads .wdsx once per point)
+    [MeanCostCI_Low, MeanCostCI_High, PointCosts] = ...
+        computeSweepPointCIs(SweepResult);
+
     md = strings(0, 1);
 
     % ============== Header ==============
@@ -159,7 +163,8 @@ function md = buildSweepReportMarkdown(SweepResult, BaseExp)
     md(end+1, 1) = "";
 
     Headers = {ParamLabel, 'Status', 'Best Cost', 'Feasible', ...
-        'Feasibility %', 'Mean Cost', 'Std Cost', 'Mean Time (s)', 'File'};
+        'Feasibility %', 'Mean Cost', '95% CI (Mean Cost)', 'Std Cost', ...
+        'Mean Time (s)', 'File'};
     Data = cell(N, numel(Headers));
 
     for k = 1:N
@@ -172,18 +177,21 @@ function md = buildSweepReportMarkdown(SweepResult, BaseExp)
             else,               Data{k, 4} = 'No'; end
             Data{k, 5} = sprintf('%.1f', 100 * P.FeasibilityRate);
             Data{k, 6} = sprintf('%.2f', P.MeanCost);
-            Data{k, 7} = sprintf('%.2f', P.StdCost);
-            Data{k, 8} = sprintf('%.2f', P.MeanTime);
+            if isfinite(MeanCostCI_Low(k))
+                Data{k, 7} = sprintf('[%.2f, %.2f]', ...
+                    MeanCostCI_Low(k), MeanCostCI_High(k));
+            else
+                Data{k, 7} = '—';
+            end
+            Data{k, 8} = sprintf('%.2f', P.StdCost);
+            Data{k, 9} = sprintf('%.2f', P.MeanTime);
             [~, name, ext] = fileparts(P.WdsxPath);
-            Data{k, 9} = [name ext];
+            Data{k, 10} = [name ext];
         else
-            Data{k, 3} = '—';
-            Data{k, 4} = '—';
-            Data{k, 5} = '—';
-            Data{k, 6} = '—';
-            Data{k, 7} = '—';
-            Data{k, 8} = '—';
-            Data{k, 9} = '—';
+            for col = 3:9
+                Data{k, col} = '—';
+            end
+            Data{k, 10} = '—';
         end
     end
 
@@ -225,32 +233,76 @@ function md = buildSweepReportMarkdown(SweepResult, BaseExp)
     md(end+1, 1) = "![Mean Time vs Parameter](figures/trend_time.png)";
     md(end+1, 1) = "";
 
-    % ============== 6. Convergence Overlay ==============
-    md(end+1, 1) = "## 6. Convergence Overlay";
+    % ============== 6. Statistical Analysis ==============
+    md(end+1, 1) = "## 6. Statistical Analysis";
+    md(end+1, 1) = "";
+
+    successfulGroups = {};
+    successfulValues = [];
+    for k = 1:N
+        if ~strcmp(Points(k).Status, 'Success'), continue; end
+        if isempty(PointCosts{k}), continue; end
+        successfulGroups{end+1} = PointCosts{k}; %#ok<AGROW>
+        successfulValues(end+1) = Points(k).Value; %#ok<AGROW>
+    end
+
+    if numel(successfulGroups) >= 2
+        [H, pKW, dfKW] = kruskalWallisH(successfulGroups);
+        if isfinite(pKW)
+            if pKW < 0.05
+                sigText = "statistically significant (p < 0.05)";
+            else
+                sigText = "not statistically significant";
+            end
+            md(end+1, 1) = sprintf( ...
+                "**Kruskal-Wallis test**: H = %.3f, df = %d, p = %.4g — " + ...
+                "the effect of **%s** on final cost is %s.", ...
+                H, dfKW, pKW, ParamLabel, sigText);
+            md(end+1, 1) = "";
+        else
+            md(end+1, 1) = "_Kruskal-Wallis test could not be computed " + ...
+                "(insufficient data across groups)._";
+            md(end+1, 1) = "";
+        end
+    else
+        md(end+1, 1) = "_Kruskal-Wallis test requires at least two successful " + ...
+            "points with feasible runs._";
+        md(end+1, 1) = "";
+    end
+
+    md(end+1, 1) = "**Methodology**:";
+    md(end+1, 1) = "- Confidence intervals: 95% percentile bootstrap (2000 resamples, PRNG seed 42).";
+    md(end+1, 1) = "- Significance test: Kruskal-Wallis H (non-parametric, no normality assumption).";
+    md(end+1, 1) = "- Effect size interpretation: |d| < 0.2 negligible, < 0.5 small, < 0.8 medium, ≥ 0.8 large.";
+    md(end+1, 1) = "";
+
+    % ============== 7. Convergence Overlay ==============
+    md(end+1, 1) = "## 7. Convergence Overlay";
     md(end+1, 1) = "";
     md(end+1, 1) = "Mean best-cost convergence of every point on the same axes:";
     md(end+1, 1) = "";
     md(end+1, 1) = "![Convergence Overlay](figures/convergence_overlay.png)";
     md(end+1, 1) = "";
 
-    % ============== 7. Distribution Overlay ==============
-    md(end+1, 1) = "## 7. Distribution Overlay";
+    % ============== 8. Distribution Overlay ==============
+    md(end+1, 1) = "## 8. Distribution Overlay";
     md(end+1, 1) = "";
     md(end+1, 1) = "Final cost distribution of feasible successful runs per point:";
     md(end+1, 1) = "";
     md(end+1, 1) = "![Distribution Overlay](figures/distribution_overlay.png)";
     md(end+1, 1) = "";
 
-    % ============== 8. Data Files ==============
-    md(end+1, 1) = "## 8. Data Files";
+    % ============== 9. Data Files ==============
+    md(end+1, 1) = "## 9. Data Files";
     md(end+1, 1) = "";
     md(end+1, 1) = "| File | Contents |";
     md(end+1, 1) = "|------|----------|";
     md(end+1, 1) = "| `data/sweep_summary.xlsx` | Sweep summary table |";
     md(end+1, 1) = "| `data/sweep_summary.csv` | Same, CSV |";
-    md(end+1, 1) = "| `data/points_index.csv` | List of points with WDSX file names and sizes |";
-    md(end+1, 1) = "| `data/all_points_convergence.csv` | Per-generation convergence for every point (long format) |";
-    md(end+1, 1) = "| `data/sweep_manifest.txt` | Summary of sweep-level configuration |";
+    md(end+1, 1) = "| `data/point_confidence_intervals.csv` | Bootstrap 95% CI per point |";
+    md(end+1, 1) = "| `data/points_index.csv` | Point list with WDSX names and sizes |";
+    md(end+1, 1) = "| `data/all_points_convergence.csv` | Per-generation convergence per point |";
+    md(end+1, 1) = "| `data/sweep_manifest.txt` | Sweep-level configuration + KW results |";
     md(end+1, 1) = "";
 
     % ============== Footer ==============

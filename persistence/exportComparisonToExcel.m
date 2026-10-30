@@ -41,6 +41,12 @@ function exportComparisonToExcel(ExpA, ExpB, NameA, NameB, fileName)
     % --- Settings ---
     writetable(buildSettingsTable(ExpA, NameA), fileName, 'Sheet', 'Settings_A');
     writetable(buildSettingsTable(ExpB, NameB), fileName, 'Sheet', 'Settings_B');
+
+    % --- Statistical Tests ---
+    StatTable = buildStatisticalTestsTable(ExpA, ExpB);
+    if ~isempty(StatTable) && height(StatTable) > 0
+        writetable(StatTable, fileName, 'Sheet', 'Statistical_Tests');
+    end
 end
 
 function T = buildConvergenceTable(ExpA, ExpB, Alg, hasA, hasB)
@@ -93,6 +99,60 @@ function C = emptyConvergence()
     C.Mean = zeros(0, 1);
     C.Min  = zeros(0, 1);
     C.Max  = zeros(0, 1);
+end
+
+function T = buildStatisticalTestsTable(ExpA, ExpB)
+    AlgsA = ExpA.ExperimentResult.Configuration.Algorithms;
+    AlgsB = ExpB.ExperimentResult.Configuration.Algorithms;
+    CommonAlgs = AlgsA(ismember(AlgsA, AlgsB));
+
+    if isempty(CommonAlgs)
+        T = table();
+        return;
+    end
+
+    n = numel(CommonAlgs);
+    Algorithm       = cell(n, 1);
+    N_A             = zeros(n, 1);
+    N_B             = zeros(n, 1);
+    MedianA         = nan(n, 1);
+    MedianB         = nan(n, 1);
+    PValue          = nan(n, 1);
+    Significant     = cell(n, 1);
+    CohensD         = nan(n, 1);
+    EffectSize      = cell(n, 1);
+    DeltaCI_Low     = nan(n, 1);
+    DeltaCI_High    = nan(n, 1);
+
+    for k = 1:n
+        Alg = CommonAlgs{k};
+        S = computeAlgorithmComparisonStats( ...
+            ExpA.ExperimentResult.Results.(Alg).Runs, ...
+            ExpB.ExperimentResult.Results.(Alg).Runs);
+
+        Algorithm{k}    = Alg;
+        N_A(k)          = S.N_A;
+        N_B(k)          = S.N_B;
+        MedianA(k)      = S.Median_A;
+        MedianB(k)      = S.Median_B;
+        PValue(k)       = S.PValue;
+        CohensD(k)      = S.CohensD;
+        EffectSize{k}   = S.EffectSize;
+        DeltaCI_Low(k)  = S.DeltaMedianCI_Low;
+        DeltaCI_High(k) = S.DeltaMedianCI_High;
+
+        if ~isfinite(S.PValue)
+            Significant{k} = 'Insufficient';
+        elseif S.Significant
+            Significant{k} = 'Yes';
+        else
+            Significant{k} = 'No';
+        end
+    end
+
+    T = table(Algorithm, N_A, N_B, MedianA, MedianB, ...
+        PValue, Significant, CohensD, EffectSize, ...
+        DeltaCI_Low, DeltaCI_High);
 end
 
 function T = buildSettingsTable(Exp, Name)

@@ -52,6 +52,12 @@ function exportSweepReportData(SweepResult, BaseExp, dataDir)
         WdsxFile, WdsxSizeBytes), ...
         fullfile(dataDir, 'points_index.csv'));
 
+    % ---- Per-point bootstrap 95% CI ----
+    [MeanCI_Low, MeanCI_High] = computeSweepPointCIs(SweepResult);
+    PointValue = [Points.Value]';
+    writetable(table(PointValue, MeanCI_Low, MeanCI_High), ...
+        fullfile(dataDir, 'point_confidence_intervals.csv'));
+
     % ---- Per-point convergence ----
     ParamValue = [];
     Generation = [];
@@ -115,6 +121,21 @@ function exportSweepReportData(SweepResult, BaseExp, dataDir)
             fprintf(fid, 'Base NS         : %d\n', C.NS);
             fprintf(fid, 'Base MaxGen     : %d\n', C.MaxGen);
         end
+        
+        % Kruskal-Wallis across successful points
+        [~, ~, PointCosts] = computeSweepPointCIs(SweepResult);
+        groups = {};
+        for k = 1:numel(Points)
+            if isempty(PointCosts{k}), continue; end
+            groups{end+1} = PointCosts{k}; %#ok<AGROW>
+        end
+        if numel(groups) >= 2
+            [H, pKW, dfKW] = kruskalWallisH(groups);
+            fprintf(fid, '\nKruskal-Wallis H : %.4f\n', H);
+            fprintf(fid, 'Kruskal-Wallis df: %d\n', dfKW);
+            fprintf(fid, 'Kruskal-Wallis p : %.4g\n', pKW);
+        end
+        fprintf(fid, '\nBootstrap: 2000 resamples, seed 42, percentile method.\n');
         fclose(fid);
     end
 end
