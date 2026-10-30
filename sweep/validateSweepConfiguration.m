@@ -2,7 +2,8 @@ function validateSweepConfiguration(BaseOptions, ParameterName, Values)
 %VALIDATESWEEPCONFIGURATION Validate the sweep setup before running.
 
     ValidParams = {'GA_Pc', 'GA_Pm', 'PSO_w', 'PSO_c1', 'PSO_c2', ...
-                   'NS', 'MaxGen', 'NumberOfRuns', 'ExperimentSeed'};
+                   'NS', 'MaxGen', 'NumberOfRuns', 'ExperimentSeed', ...
+                   'Pmin', 'Vmax'};
 
     if ~ischar(ParameterName) || ~any(strcmp(ParameterName, ValidParams))
         error('sweep:InvalidParameter', ...
@@ -44,6 +45,18 @@ function validateSweepConfiguration(BaseOptions, ParameterName, Values)
                     any(Values ~= fix(Values))
                 error('sweep:ValueOutOfRange', ...
                     'ExperimentSeed values must be integers in [0, 2^32-1].');
+            end
+
+        case 'Pmin'
+            if any(Values < 0)
+                error('sweep:ValueOutOfRange', ...
+                    'Pmin values must be non-negative.');
+            end
+
+        case 'Vmax'
+            if any(Values <= 0)
+                error('sweep:ValueOutOfRange', ...
+                    'Vmax values must be strictly positive.');
             end
     end
 

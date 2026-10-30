@@ -7,6 +7,11 @@ function SweepResult = runParameterSweep( ...
 % Each sweep point is executed by runExperiment and saved as a .wdsx
 % snapshot inside Environment.OutDir. Successful points record their
 % best score, feasibility statistics and execution time.
+%
+% Supports algorithm parameters (GA_Pc, GA_Pm, PSO_w, PSO_c1, PSO_c2),
+% size/budget parameters (NS, MaxGen, NumberOfRuns, ExperimentSeed), and
+% constraint parameters (Pmin, Vmax). Constraint sweeps override the
+% corresponding field of Problem for each point.
 
     validateSweepConfiguration(BaseOptions, ParameterName, ParameterValues);
 
@@ -43,6 +48,13 @@ function SweepResult = runParameterSweep( ...
 
     SweepResult.Points = repmat(PointTemplate, NPoints, 1);
 
+    % Pre-populate each point's Value so cancelled / not-started rows
+    % display the intended sweep value instead of NaN in summary tables
+    % and reports.
+    for k = 1:NPoints
+        SweepResult.Points(k).Value = ParameterValues(k);
+    end
+
     % ---- Iterate over sweep points ----
     for k = 1:NPoints
 
@@ -62,9 +74,9 @@ function SweepResult = runParameterSweep( ...
                 'ParameterValue',  Value));
         end
 
-        [PointConfig, PointOptions, PointSettings] = ...
+        [PointConfig, PointOptions, PointSettings, PointProblem] = ...
             applySweepParameter(BaseConfig, BaseOptions, ...
-                Environment.BaseSettings, ParameterName, Value);
+                Environment.BaseSettings, Problem, ParameterName, Value);
 
         % Attach per-run progress forwarding
         if ~isempty(ProgressCallback)
@@ -81,10 +93,9 @@ function SweepResult = runParameterSweep( ...
         end
 
         PointTimer = tic;
-        SweepResult.Points(k).Value = Value;
 
         try
-            ExpResult = runExperiment(d, Problem, PointConfig, PointOptions);
+            ExpResult = runExperiment(d, PointProblem, PointConfig, PointOptions);
             Elapsed   = toc(PointTimer);
 
             % If cancellation was requested during this point, stop
@@ -101,7 +112,7 @@ function SweepResult = runParameterSweep( ...
                 selectBestExperimentRun(ExpResult);
 
             [NP_vals, VP_vals, Converged] = ...
-                calculateHydraulicResults(d, BestRun.Position, Problem.NP);
+                calculateHydraulicResults(d, BestRun.Position, PointProblem.NP);
 
             Hydraulics.NodePressures  = NP_vals;
             Hydraulics.PipeVelocities = VP_vals;
@@ -114,7 +125,7 @@ function SweepResult = runParameterSweep( ...
                 Environment.InpFileStr, Environment.DFileStr, ...
                 Environment.CostFileStr, ...
                 Environment.DUnit, Environment.Headloss, ...
-                PointSettings, PointConfig, Problem, ...
+                PointSettings, PointConfig, PointProblem, ...
                 ExpResult, BestAlgorithm, BestRunIndex, ...
                 Hydraulics.NodePressures, Hydraulics.PipeVelocities, ...
                 Hydraulics.Converged, ...

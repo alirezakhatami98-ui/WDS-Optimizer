@@ -1,6 +1,10 @@
-function [Config, Options, Settings] = applySweepParameter( ...
-    Config, Options, Settings, ParameterName, Value)
+function [Config, Options, Settings, Problem] = applySweepParameter( ...
+    Config, Options, Settings, Problem, ParameterName, Value)
 %APPLYSWEEPPARAMETER Override one parameter with a given value.
+%
+%   Returns the modified Config, Options, Settings, and Problem. Problem
+%   is passed through unchanged for algorithm/size parameters, and only
+%   mutated for constraint sweep parameters (Pmin, Vmax).
 
     switch ParameterName
         case 'GA_Pc'
@@ -25,11 +29,9 @@ function [Config, Options, Settings] = applySweepParameter( ...
 
         case 'NS'
             Config.NS        = Value;
-            % Not part of Settings
 
         case 'MaxGen'
             Config.MaxGen    = Value;
-            % Not part of Settings
 
         case 'NumberOfRuns'
             Options.NumberOfRuns  = Value;
@@ -38,6 +40,12 @@ function [Config, Options, Settings] = applySweepParameter( ...
         case 'ExperimentSeed'
             Options.ExperimentSeed  = Value;
             Settings.ExperimentSeed = Value;
+
+        case 'Pmin'
+            Problem.Pmin = Value;
+
+        case 'Vmax'
+            Problem.Vmax = Value;
 
         otherwise
             error('applySweepParameter:Unknown', ...

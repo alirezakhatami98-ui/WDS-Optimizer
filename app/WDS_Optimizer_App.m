@@ -1827,6 +1827,26 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                                'Experiment Seed'}];
             Ids    = [Ids, {'NS', 'MaxGen', 'NumberOfRuns', 'ExperimentSeed'}];
 
+            % Constraint sweep parameters — labeled with the network's
+            % pressure/velocity units when an INP has been loaded.
+            PminLabel = 'Min Pressure (Pmin)';
+            VmaxLabel = 'Max Velocity (Vmax)';
+            if ~isempty(app.NetworkUnits)
+                if isfield(app.NetworkUnits, 'PressureUnit') && ...
+                        ~isempty(app.NetworkUnits.PressureUnit)
+                    PminLabel = sprintf('Min Pressure (%s)', ...
+                        app.NetworkUnits.PressureUnit);
+                end
+                if isfield(app.NetworkUnits, 'VelocityUnit') && ...
+                        ~isempty(app.NetworkUnits.VelocityUnit)
+                    VmaxLabel = sprintf('Max Velocity (%s)', ...
+                        app.NetworkUnits.VelocityUnit);
+                end
+            end
+
+            Labels = [Labels, {PminLabel, VmaxLabel}];
+            Ids    = [Ids, {'Pmin', 'Vmax'}];
+
             if ~isempty(app.SweepDialogFigure) && ...
                     isvalid(app.SweepDialogFigure)
                 delete(app.SweepDialogFigure);
@@ -1957,6 +1977,8 @@ classdef WDS_Optimizer_App < matlab.apps.AppBase
                 case 'MaxGen',        v = app.MaxGenEditField.Value;
                 case 'NumberOfRuns',  v = app.ExperimentSettings.NumberOfRuns;
                 case 'ExperimentSeed',v = app.ExperimentSettings.ExperimentSeed;
+                case 'Pmin',          v = app.PminEditField.Value;
+                case 'Vmax',          v = app.VmaxEditField.Value;
                 otherwise,            v = NaN;
             end
         end
